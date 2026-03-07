@@ -1,4 +1,4 @@
-# Test TEST-001: Valid PDF Referral Document Acceptance
+# Test TEST-001
 
 ---
 
@@ -7,78 +7,68 @@
 
 ## 🔗 SpecForge Chain
 Context → Requirements (1..N) → Feature → Scenario → **Test** → Plan → Tasks  
-                                                         ↑ You are here
+                                                      ↑ You are here
 
 ---
 
-## Summary
-Verify that a valid PDF referral document submitted via HTTP POST is accepted, validated, stored in Blob Storage with the assigned ReferralId, and triggers a ReferralReceived domain event.
+## Requirement Traceability
+**Primary Requirement**: REQ-001 (the requirement this test MOST DIRECTLY validates)
 
-## Primary Requirement
-REQ-001: Referral Intake Validation and Storage
+**All Referenced Requirements** (direct references only; do NOT invent transitive dependencies):
+- REQ-001 — Primary requirement (directly tested)
 
-## Related Scenarios
-SCENARIO-001.feature: Accept Valid PDF Referral Document
-
----
-
-## Test Assertions
-
-### Invariant Assertions
-Document the invariants that remain true after this test passes:
-
-1. **Invariant: Each Referral must have exactly one TriageRecord after successful triage processing completes.**
-   - After acceptance: Referral aggregate is created with ReferralId assigned but TriageRecord is null (awaiting AI processing)
-   - Status: Satisfied (invariant will be satisfied later by REQ-002)
-
-2. **Invariant: ReferralDocument must be preserved in original form for audit, separate from TriageRecord.**
-   - After acceptance: ReferralDocument with unmodified binary content is persisted in Blob Storage
-   - Status: Satisfied (document preserved in original form)
+**Originating Scenario**: SCENARIO-001.feature (from `../../features/referral-intake/SCENARIO-001.feature`)
 
 ---
 
-### Domain Event Assertions
-Document the domain events that must be emitted when this test passes:
+## Assertions
+**CRITICAL RULE: This section contains assertions in STRUCTURED format only. Each assertion MUST be one of the 4 patterns below. Zero narrative prose allowed between assertions.**
 
-1. **Event: ReferralReceived**
-   - Triggers on: Successful document validation and storage
-   - Payload must contain: ReferralId (UUID), DocumentId (UUID), FileType (PDF), UploadTimestamp (RFC3339 datetime), UploadSource (string = "/referrals/intake")
-   - Assert: Event must be emitted exactly once per test execution
-   - Assert: All payload fields must be non-null and have correct syntax
+**Invariant Assertions** (checked AFTER SCENARIO-001.feature has been implemented and executed):
+- Assert: Referral-UniqueIdInvariant is preserved
+  - Context invariant name: Referral-UniqueIdInvariant
+  - Assertion: Assert: Each Referral.ReferralId must be globally unique (no two Referral aggregates share the same ReferralId)
+- Assert: Referral-DocumentRequiredInvariant is preserved
+  - Context invariant name: Referral-DocumentRequiredInvariant
+  - Assertion: Assert: Referral.Document != null
 
----
+**Domain Event Assertions** (checked when SCENARIO-001.feature When/Then steps are executed AFTER implementation):
+- Assert: Referral-Submitted is emitted = true
+- Assert: Referral-Submitted.ReferralId == generated_uuid
+- Assert: Referral-Submitted.DocumentFormat == pdf
+- Assert: Referral-Submitted.DocumentHash == valid_sha256_hash
+- Assert: Referral-Submitted.SubmittedAt == current_timestamp
 
-### Outcome Assertions
-Document the measurable outcomes that define test success:
-
-1. **HTTP Response Status**
-   - Assert: HTTP response status code equals 201 (Created)
-
-2. **HTTP Response Body**
-   - Assert: Response JSON contains "referralId" field with valid UUID format
-   - Assert: Response JSON contains "timestamp" field with valid RFC3339 datetime
-   - Assert: Response JSON cannot contain null or empty values in either field
-
-3. **Blob Storage Persistence**
-   - Assert: File exists in Blob Storage at exact path `/referrals/incoming/{referralId}` where {referralId} matches HTTP response
-   - Assert: Stored file binary content is identical to submitted PDF (byte-for-byte comparison)
-   - Assert: File metadata (size, upload time) matches submission
-
-4. **Referral Aggregate State**
-   - Assert: Referral aggregate exists with ReferralId matching HTTP response
-   - Assert: Referral.ReferralDocument.FileType equals "PDF"
-   - Assert: Referral.ReferralDocument.ContentData size matches submitted file size
-   - Assert: Referral.TriageRecord is null (not yet created)
+**Required Outcome Assertions** (directly from REQ-001 Requirement Statement):
+- Assert: REQ-001 requirement is satisfied
+  - Requirement statement text: When a clinical operations coordinator submits a referral document via HTTP POST, the Referral aggregate shall validate that the ReferralDocument has a supported format (pdf, text, image), size between 1 byte and 50 MB, and non-empty storage path. If valid, Referral shall assign a unique ReferralId, store the document metadata, and emit Referral-Submitted event with ReferralId, DocumentFormat, DocumentHash, and SubmittedAt payload. The submitted Referral aggregate shall then be immediately retrievable from IReferralRepository by ReferralId.
+  - Assertion syntax:
+    - Assert: ReferralDocument.Format in {pdf, text, image}
+    - Assert: ReferralDocument.Size > 0 AND ReferralDocument.Size < 52428800 (50 MB in bytes)
+    - Assert: ReferralDocument.StoragePath != empty
+    - Assert: Referral.ReferralId != null AND Referral.ReferralId is UUID
+    - Assert: Referral is retrievable from IReferralRepository.Load(ReferralId)
 
 ---
 
 ## SpecForge Rules
-- This test is PASS/FAIL with no partial credit
-- All assertions must be true for the test to pass
-- Test is independent of other tests (can run in any order)
-- Test setup must create clean state (no side effects from prior test runs)
+- MUST reference ≥1 requirement via Primary Requirement and All Referenced Requirements section.
+- MUST link to originating SCENARIO-001.feature.
+- MUST assert ALL invariants from SCENARIO-001.feature Domain Context section.
+- MUST assert ALL domain events from SCENARIO-001.feature Domain Context section.
+- MUST NOT introduce new invariants or domain events — only assert those from Context.
+- ZERO narrative sentences allowed — only assertion syntax.
 
 ---
 
 ## Next Step Directive
-Create corresponding test implementation (code) that executes ALL assertions above.
+Create one plan file named `/planning/PLAN-001.md` using the `{{PLAN_ID}}.template.md` template.
+
+The plan MUST decompose ALL assertions from this test into executable planning steps.
+
+Validate test-to-plan chain before proceeding:
+- Verify `/requirements/REQ-001.md` exists
+- Verify `/features/referral-intake/SCENARIO-001.feature` exists
+- Verify all invariant names match exactly from Context
+- Verify all event names match exactly from Context
+- Verify zero narrative sentences exist in Assertions section (only assertion syntax)

@@ -1,67 +1,89 @@
-# Task TASK-001 for Referral Intake
+# Task TASK-001 for referral-intake
 
-## SpecForge Chain Position
-This is artefact 7 of 7.
+---
 
-SpecForge Chain:
-Context → Requirements (1..N) → Feature → Scenario → Test → Plan → **Task**
+## 🔗 SpecForge Chain Position
+**This is artefact 7 of 7.**
+
+## 🔗 SpecForge Chain
+Context → Requirements (1..N) → Feature → Scenario → Test → Plan → Task
+
+You are defining: Task.
 
 ---
 
 ## TDD Cycle Phase (CRITICAL)
 **Phase**: `[RED]`
 
-This task writes a new failing test for validating and rejecting unsupported file types.
+---
+
+## Test Immutability Constraint (TDD Discipline)
+
+⚠️ **IF Phase = [RED]**:
+- You are WRITING a new test file validating document format validation behavior
+- This test MUST fail initially (proving test is real and validating something)
+- Commit message MUST include `[RED]`: `test(referral-intake): [RED] validate document format`
+- Once committed, this test becomes a **static contract**
 
 ---
 
 ## SpecForge Contract
-This artefact is governed by the SpecForge Contract.
+This artefact is governed by the SpecForge Contract. Strict enforcement rules:
 
-1. Do NOT interpret any requirement — COPY verbatim only.
-2. Do NOT summarise requirement text — COPY complete Requirement Statement sections.
-3. Do NOT infer missing behaviour — COPY only what exists in requirements and tests.
-4. Do NOT add assumptions beyond test assertions.
-5. Do NOT remove constraints — INCLUDE all assertions from test files.
-6. Do NOT introduce new invariants, domain events, or states.
-7. Do NOT code beyond test assertions — Task complete when ALL test cases pass.
-8. Do NOT reference infrastructure, frameworks, or patterns — Use ONLY domain concepts.
+1. Do NOT reinterpret any requirement. COPY Requirement Statement sections verbatim from `/requirements/REQ-001.md`.
+2. Do NOT summarise or simplify requirement text. COPY complete text without omission.
+3. Do NOT infer missing behaviour. COPY ONLY what exists in requirements and tests.
+4. Do NOT add assumptions. Reference ONLY assertions explicitly in `TEST-001.md` Assertions sections.
+5. Do NOT introduce new invariants, domain events, or states. Copy only from Context and requirements.
 
 ---
 
-## Requirements (Verbatim Copy-Forward)
-The following requirements MUST be copied forward exactly as written:
+# Requirements (Verbatim Copy-Forward)
 
-- REQ-001: When a referral document is submitted via HTTP POST to the referral intake endpoint, the Referral aggregate shall validate file type (PDF, text, or scanned image), validate content size does not exceed 5MB, accept the valid document, store the raw ReferralDocument in Blob Storage at /referrals/incoming/{referralId}, assign a unique ReferralId, emit ReferralReceived domain event with required payload fields, and return the ReferralId to the HTTP caller.
+- REQ-001: When a clinical operations coordinator submits a referral document via HTTP POST, the Referral aggregate shall validate that the ReferralDocument has a supported format (pdf, text, image), size between 1 byte and 50 MB, and non-empty storage path. If valid, Referral shall assign a unique ReferralId, store the document metadata, and emit Referral-Submitted event with ReferralId, DocumentFormat, DocumentHash, and SubmittedAt payload. The submitted Referral aggregate shall then be immediately retrievable from IReferralRepository by ReferralId.
 
 ---
 
-## Scenarios and Tests Covered
-**Scenarios covered** (from Plan):
-- SCENARIO-003
+# Scenarios and Tests Covered
+This Task implements behaviour validated by tests listed below.
+
+**Scenarios covered**:
+- SCENARIO-001
 
 **Test cases this task MUST satisfy**:
-- TEST-003 — from ../tests/referral-intake/TEST-003.md
+- TEST-001 — from `/tests/referral-intake/TEST-001.md`
 
 ---
 
-## Task Description
+# Task Description
 
-Test: TEST-003 → Requirement: REQ-001 → Result: HTTP intake must reject unsupported file type (Word .docx) with HTTP 400 response containing error message "Unsupported file type" and details "Accepted types: PDF, plain text (.txt), scanned images (JPEG, PNG)", no ReferralId assigned, no Blob Storage write, no ReferralReceived event emitted → Approach: Write test that submits Word document to HTTP intake endpoint, asserts HTTP 400 response status, asserts error message content, asserts no artifacts created in system
-
----
-
-## Commit Instruction
-Commit message format (REQUIRED):
 ```
-test(referral-intake): [RED] Reject unsupported file types in intake validation
-```
+Planning Step Reference: Step 1: Referral must Format in {pdf, text, image} → Tests TEST-001 → Validates REQ-001
 
-After this commit, the test becomes a static contract. No modifications allowed.
+Test Reference: TEST-001
+
+Requirement: REQ-001
+
+Assertion: Assert: ReferralDocument.Format in {pdf, text, image}
+
+Approach: Write test that validates ReferralDocument constructor rejects formats outside of {pdf, text, image} and accepts formats within the set
+```
 
 ---
 
-## Success Criteria
-- Test file created at /tests/referral-intake/TEST-003.md (or equivalent code test)
-- Test assertion syntax: HTTP status 400, error message "Unsupported file type", no ReferralId in response, no Blob Storage write, no ReferralReceived event
-- Test MUST fail before TASK-002 implementation
+# TDD Verification Checklist (Pre-Completion)
+
+**REQUIRED validations before marking Status = COMPLETE:**
+
+### If Phase = [RED]:
+- ✅ Test file created: Test written validating document format validation
+- ✅ Test is failing: Test fails initially with no implementation
+- ✅ Commit signed: Message includes `test(referral-intake): [RED]` marker
+- ✅ No test mutations: Test file is static until [IMPL] phase
+
+---
+
+# Completion State
+Status: NOT STARTED
+Completed By: 
+Completed On:
