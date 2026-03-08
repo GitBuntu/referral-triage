@@ -49,7 +49,7 @@ Generate a short clinical summary.
 
 Produce a structured JSON triage record.
 
-Store the triage record in Cosmos DB or Table Storage.
+Store the triage record in SQL DB or Table Storage.
 
 3. Daily Metrics Aggregation (Timer Trigger)
 Run once per day at 02:00.

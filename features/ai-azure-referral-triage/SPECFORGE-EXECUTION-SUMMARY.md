@@ -13,7 +13,7 @@ All 7 SpecForge artefacts have been created for bounded context **ai-azure-refer
 
 Defines:
 - **Aggregates**: Referral, TriageRecord
-- **Value Objects**: ReferralIdentity, ReferralDocument, TriageResult  
+- **Value Objects**: ReferralIdentity, ReferralDocument, TriageResult
 - **Domain Events**: Referral-Submitted, Referral-Triaged
 - **Invariants**: 6 invariants enforcing business rules
 - **Repositories**: IReferralRepository, ITriageRecordRepository
@@ -122,7 +122,7 @@ Downstream: clinical-workflow-service receives event
 4. After all TASK-* files are COMPLETE:
    - Domain logic is fully tested and working
    - Repository interfaces are defined but NOT implemented
-   - Next: Implement Repository interfaces for chosen storage (Cosmos DB, Table Storage, SQL)
+   - Next: Implement Repository interfaces for chosen storage (SQL DB, Table Storage, SQL)
 
 ---
 
@@ -137,7 +137,7 @@ Downstream: clinical-workflow-service receives event
 ### Phase 2: Repository Implementation (After SpecForge)
 - Implement `IReferralRepository` interface
 - Implement `ITriageRecordRepository` interface
-- Choose storage technology (Cosmos DB recommended per Azure instructions)
+- Choose storage technology (SQL DB recommended per Azure instructions)
 - Integrate with Azure Functions triggers (HTTP, Blob, Timer)
 
 ### Phase 3: Deployment
@@ -154,7 +154,7 @@ Downstream: clinical-workflow-service receives event
 - `domain/00-context.md` (1 Context file)
 
 **Requirements**:
-- `requirements/REQ-001.md` 
+- `requirements/REQ-001.md`
 - `requirements/REQ-002.md`
 - `requirements/REQ-003.md`
 
@@ -185,7 +185,7 @@ Downstream: clinical-workflow-service receives event
 ✅ **All prerequisites complete**
 ✅ **Domain model locked** (immutable Context)
 ✅ **Requirements locked** (immutable REQs)
-✅ **Tests locked** (immutable TESTSs)  
+✅ **Tests locked** (immutable TESTSs)
 ✅ **Planning locked** (immutable PLANs)
 ✅ **Task index defined** (ready for TDD execution)
 

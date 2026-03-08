@@ -6,7 +6,7 @@
 **This is artefact 1 of 7.**
 
 ## 🔗 SpecForge Chain
-**Context** → Requirements (1..N) → Feature → Scenario → Test → Plan → Tasks  
+**Context** → Requirements (1..N) → Feature → Scenario → Test → Plan → Tasks
 ↑ You are here
 
 ---
@@ -19,7 +19,7 @@
 **Boundaries**: This context is bounded by:
 - **Upstream inputs**: None.
 - **Downstream outputs**: Clinical-workflow-service receives Referral-Triaged event when referral intake and triage are complete. Clinical-workflow-service responds by initiating appropriate specialty workflow.
-- **Not included**: 
+- **Not included**:
   - Clinical workflow execution (owned by clinical-workflow-service)
   - Patient record management (owned by patient-management-service)
   - Authorization and permissions (owned by auth-service)
@@ -205,7 +205,7 @@ SpecForge completes at Task 7 (all tests pass). What happens next:
 
 1. **Domain logic is complete** — Referral and TriageRecord aggregates enforce invariants, domain events are emitted correctly, tests validate behavior
 2. **Repository interfaces are defined** — IReferralRepository and ITriageRecordRepository exist but are NOT yet implemented
-3. **Infrastructure must support Repository contracts** — Developer chooses persistent storage technology (Cosmos DB, Table Storage, or SQL Server) and implements the Repository interfaces
+3. **Infrastructure must support Repository contracts** — Developer chooses persistent storage technology (SQL DB, Table Storage, or SQL Server) and implements the Repository interfaces
 4. **Storage schema must support load patterns** — Developer creates database/table structure to support: load by ReferralId, load by status, load by specialty, load by urgency, load by date range
 5. **Repository implementation is tested** — Integration tests verify that Repository saves and loads aggregates correctly using the chosen storage technology
 6. **Application is deployable** — Domain logic + Repository implementation + integration tests + Azure Functions trigger bindings = complete, testable, deployable application
