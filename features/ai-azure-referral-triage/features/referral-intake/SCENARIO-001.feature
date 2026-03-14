@@ -1,11 +1,52 @@
-Feature: Accept Valid PDF Referral Document
+@REQ-001
+Feature: referral-intake
 
-  Scenario: HTTP intake accepts valid PDF document and returns ReferralId
-    Given an HTTP POST endpoint at "/referrals/intake"
-    And a valid PDF referral document (2 MB) with existing binary content
-    When the POST request is sent with the PDF file attached
-    Then the HTTP response status is 201
-    And the response body contains a valid UUID in the "referralId" field
-    And the response body contains a valid RFC3339 timestamp in the "timestamp" field
-    And the raw PDF document is stored in Blob Storage at path "/referrals/incoming/{referralId}"
-    And a ReferralReceived domain event is emitted with the ReferralId in the event payload
+---
+
+## 🔗 SpecForge Chain Position
+**This is artefact 4 of 7.**
+
+## 🔗 SpecForge Chain
+Context → Requirements (1..N) → Feature → **Scenario** → Test → Plan → Tasks  
+                                      ↑ You are here
+
+---
+
+Scenario: SCENARIO-001 — HTTP endpoint accepts and validates referral document
+
+  Given a clinical operations coordinator submits a referral document via HTTP POST with format=pdf, size between 1 byte and 50 MB, and non-empty storage path
+  When the Referral aggregate validates the ReferralDocument
+  Then the Referral aggregate assigns a unique ReferralId
+  And a Referral aggregate is created with the validated document metadata
+  And Referral-Submitted event is emitted with ReferralId, DocumentFormat, DocumentHash, and SubmittedAt payload
+  And the Referral aggregate becomes immediately retrievable from IReferralRepository by ReferralId
+
+---
+
+## Covered Requirements
+This scenario validates the following requirement(s) through its Given/When/Then steps.
+
+- REQ-001
+
+---
+
+## Domain Context
+This scenario demonstrates:
+- **Domain events that MUST be emitted**: Referral-Submitted
+- **Invariants that MUST remain satisfied**: Referral-UniqueIdInvariant, Referral-DocumentRequiredInvariant
+
+---
+
+## SpecForge Rules
+- Must reference ≥1 requirement via tags and Covered Requirements.
+- Feature tags MUST exactly match Covered Requirements IDs (in same order).
+- Must NOT introduce new invariants, events, or domain concepts not in the Context.
+- Must demonstrate that domain events are emitted and invariants are preserved.
+- All Given/When/Then text MUST be copied verbatim from the requirement — never paraphrase or abbreviate.
+
+---
+
+## Next Step Directive
+Create a test file named `SCENARIO-001-TEST-001.md` under `/tests/referral-intake/`.
+
+The test MUST reference all requirement IDs covered by this scenario.

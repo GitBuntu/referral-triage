@@ -1,4 +1,6 @@
-# Feature Specification: Referral Intake
+# Feature: referral-intake
+
+**Location**: `features/referral-intake/spec.md`
 
 ---
 
@@ -7,108 +9,55 @@
 
 ## 🔗 SpecForge Chain
 Context → Requirements (1..N) → **Feature** → Scenario → Test → Plan → Tasks  
-                                             ↑ You are here
+                                   ↑ You are here
 
 ---
 
-## Feature Name
-**Referral Intake**
-
-## Feature Purpose
-Enable automated ingestion of referral documents via HTTP, validate document properties, store raw documents for audit, and trigger AI triage processing. This feature is the entry point for the referral pipeline.
-
-## Requirements Covered
-This feature implements the following requirements:
-- REQ-001: Referral Intake Validation and Storage
-
-## Related Requirements (Not Implemented in This Feature)
-- REQ-002: AI Triage Classification and Record Creation (implemented in separate feature)
-- REQ-003: Daily Metrics Aggregation (implemented in separate feature)
+## Implements Requirements
+- REQ-001 (from `../../requirements/REQ-001.md`)
 
 ---
 
-## Scenarios
-
-### Scenario 1: Accept Valid Referral Document (PDF)
-**File**: `SCENARIO-001.feature` (Gherkin)
-
-**Description**: HTTP POST to intake endpoint with a valid PDF referral document.
-
-**Expected Outcome**: Document is validated, stored in Blob Storage, unique ReferralId is assigned, ReferralReceived event is emitted, and ReferralId is returned to caller.
+## Behavior
+- REQ-001: When a clinical operations coordinator submits a referral document via HTTP POST, the Referral aggregate shall validate that the ReferralDocument has a supported format (pdf, text, image), size between 1 byte and 50 MB, and non-empty storage path. If valid, Referral shall assign a unique ReferralId, store the document metadata, and emit Referral-Submitted event with ReferralId, DocumentFormat, DocumentHash, and SubmittedAt payload. The submitted Referral aggregate shall then be immediately retrievable from IReferralRepository by ReferralId.
 
 ---
 
-### Scenario 2: Accept Valid Referral Document (Text)
-**File**: `SCENARIO-002.feature` (Gherkin)
-
-**Description**: HTTP POST to intake endpoint with a valid plain-text referral document.
-
-**Expected Outcome**: Document is validated, stored in Blob Storage, unique ReferralId is assigned, ReferralReceived event is emitted, and ReferralId is returned to caller.
+## Invariants
+When this feature executes, these invariants MUST remain true:
+- Referral-UniqueIdInvariant — from Context (enforced by REQ-001)
+- Referral-DocumentRequiredInvariant — from Context (enforced by REQ-001)
 
 ---
 
-### Scenario 3: Reject Invalid File Type
-**File**: `SCENARIO-003.feature` (Gherkin)
-
-**Description**: HTTP POST to intake endpoint with a document in unsupported file type (e.g., Word, Excel, image other than scanned).
-
-**Expected Outcome**: Document is rejected, HTTP 400 error is returned with error message, no ReferralId is assigned, no Blob Storage dump occurs, no event is emitted.
+## Domain Events
+When this feature executes its requirements, these events are emitted:
+- Referral-Submitted — from Context (emitted by REQ-001)
 
 ---
 
-### Scenario 4: Reject Oversized Document
-**File**: `SCENARIO-004.feature` (Gherkin)
-
-**Description**: HTTP POST to intake endpoint with a document exceeding 5MB size limit.
-
-**Expected Outcome**: Document is rejected, HTTP 413 error is returned with error message, no ReferralId is assigned, no Blob Storage dump occurs, no event is emitted.
-
----
-
-### Scenario 5: Reject Empty Document
-**File**: `SCENARIO-005.feature` (Gherkin)
-
-**Description**: HTTP POST to intake endpoint with a document containing zero bytes or empty content.
-
-**Expected Outcome**: Document is rejected, HTTP 400 error is returned with error message, no ReferralId is assigned, no Blob Storage dump occurs, no event is emitted.
-
----
-
-## Implementation Notes
-
-### HTTP Endpoint Contract
-- **Path**: POST /referrals/intake
-- **Request Body**: Multipart form-data with single file part
-- **Success Response**: HTTP 201 with JSON body: `{"referralId": "UUID", "timestamp": "RFC3339 datetime"}`
-- **Error Response**: HTTP 400/413 with JSON body: `{"error": "string", "details": "string"}`
-
-### File Type Validation
-- Accepted types: PDF, plain text (.txt), scanned images (JPEG, PNG)
-- Rejected types: Word, Excel, Powerpoint, Archives (ZIP, RAR), Executables, etc.
-
-### Size Validation
-- Maximum: 5MB (5242880 bytes)
-- Minimum: 1 byte (no empty files)
-
-### Storage Path Convention
-- Blob path: `/referrals/incoming/{referralId}` where {referralId} is the UUID assigned at intake
-
-### Event Emission
-- Event name: ReferralReceived
-- Emitted immediately after document validation and storage
-- Consumed by: Blob Trigger for AI Triage Processor (upstream system triggers Blob upload)
-
----
-
-## SpecForge Contract Rules
-- All scenarios MUST be implemented as Gherkin feature files
-- Each scenario corresponds to ONE test case (or multiple test cases if complex)
-- Scenarios define ONLY observable behavior (inputs, outputs, side effects)
-- Scenarios do NOT define implementation details
-- All referenced requirements MUST exist in /requirements/ directory
+## SpecForge Rules
+- Must reference one or more requirements in Implements Requirements.
+- All referenced requirements must exist in `/requirements`.
+- Must not introduce new invariants or events beyond those from the Context.
+- All invariants listed here must be supported by at least one requirement.
+- All events listed here must be triggered by at least one requirement.
+- Scenarios in this feature must use @tags matching the requirement IDs listed here.
 
 ---
 
 ## Next Step Directive
-Create Gherkin feature files (SCENARIO-001.feature through SCENARIO-005.feature) in the `referral-intake/` folder.  
-Then create corresponding test files (TEST-001.md through TEST-005.md) in the `/tests/referral-intake/` folder.
+Create scenario files in the same directory (`referral-intake/`).
+
+**Scenario file path**: `referral-intake/SCENARIO-001.feature` (sequential: 001, 002, 003...)
+
+**Scenario tags**: Each scenario MUST use @tags matching requirement IDs from Implements Requirements above.
+
+**Coverage rules**:
+- Each scenario MUST reference ≥1 requirement ID from Implements Requirements section.
+- Create only as many scenarios as needed to validate the feature behaviors.
+
+**Validation before proceeding**:
+- Verify all REQ-*.md files exist in `/requirements/`
+- Verify Context file exists at `/domain/00-context.md`
+- Verify all Invariants and Events listed above exist in Context
