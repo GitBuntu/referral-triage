@@ -14,7 +14,21 @@ public interface IDocumentExtractionService
 
 public interface ITriageProcessingService
 {
-    Task ProcessTriageAsync(string referralId, string documentFormat, string extractedText);
+    /// <summary>
+    /// Processes triage based on a document stored in blob storage.
+    /// </summary>
+    /// <param name="referralId">The referral identifier.</param>
+    /// <param name="documentFormat">The document format (pdf, txt, png, jpg, jpeg).</param>
+    /// <param name="blobPath">The blob storage path to the uploaded referral document (e.g., referrals/incoming/{referralId}/{fileName}).</param>
+    /// <remarks>
+    /// This method will:
+    /// 1. Extract text from the document at the specified blob path (via IDocumentExtractionService)
+    /// 2. Classify the referral using AI (via ITriageClassificationService)
+    /// 3. Validate the triage record against domain invariants
+    /// 4. Store the result in the database
+    /// 5. Update the referral status accordingly
+    /// </remarks>
+    Task ProcessTriageAsync(string referralId, string documentFormat, string blobPath);
 }
 
 public interface ITriageClassificationService

@@ -20,7 +20,7 @@ public class MetricsAggregatorFunction
     }
 
     [Function("MetricsAggregator")]
-    public async Task Run([TimerTrigger("0 0 2 * * *")] TimerInfo myTimer)
+    public async Task Run([TimerTrigger("%AzureServiceSettings:MetricsAggregationSchedule%")] TimerInfo myTimer)
     {
         _logger.LogInformation("MetricsAggregator timer trigger function executed at: {Now}", DateTime.UtcNow);
 
@@ -28,11 +28,11 @@ public class MetricsAggregatorFunction
         {
             // Aggregate metrics for yesterday (previous day)
             var metricsDate = DateTime.UtcNow.AddDays(-1).Date;
-            
+
             _logger.LogInformation("Starting metrics aggregation for date: {MetricsDate:yyyy-MM-dd}", metricsDate);
-            
+
             await _metricsAggregationService.AggregateMetricsAsync(metricsDate);
-            
+
             _logger.LogInformation("Metrics aggregation completed successfully for date: {MetricsDate:yyyy-MM-dd}", metricsDate);
 
             if (myTimer.ScheduleStatus is not null)

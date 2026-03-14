@@ -34,19 +34,19 @@ public class ReferralIntakeFunction
         {
             // Read request body
             var body = await new StreamReader(req.Body).ReadToEndAsync();
-            
+
             if (string.IsNullOrWhiteSpace(body))
             {
-                return CreateErrorResponse(req, HttpStatusCode.BadRequest, "Request body cannot be empty");
+                return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Request body cannot be empty");
             }
 
             // Parse JSON
-            var request = JsonSerializer.Deserialize<ReferralIntakeRequest>(body, 
+            var request = JsonSerializer.Deserialize<ReferralIntakeRequest>(body,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (request == null)
             {
-                return CreateErrorResponse(req, HttpStatusCode.BadRequest, "Invalid request format");
+                return await CreateErrorResponse(req, HttpStatusCode.BadRequest, "Invalid request format");
             }
 
             // Process referral
@@ -61,22 +61,22 @@ public class ReferralIntakeFunction
         catch (ArgumentException ex)
         {
             _logger.LogWarning(ex, "Validation error in ReferralIntake");
-            return CreateErrorResponse(req, HttpStatusCode.BadRequest, ex.Message);
+            return await CreateErrorResponse(req, HttpStatusCode.BadRequest, ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing referral intake");
-            return CreateErrorResponse(req, HttpStatusCode.InternalServerError, 
+            return await CreateErrorResponse(req, HttpStatusCode.InternalServerError,
                 "An error occurred processing the referral");
         }
     }
 
-    private HttpResponseData CreateErrorResponse(HttpRequestData req, HttpStatusCode statusCode, string message)
+    private async Task<HttpResponseData> CreateErrorResponse(HttpRequestData req, HttpStatusCode statusCode, string message)
     {
         var response = req.CreateResponse(statusCode);
         var errorResponse = new ErrorResponse { Message = message };
         response.Headers.Add("Content-Type", "application/json");
-        response.WriteAsJsonAsync(errorResponse).GetAwaiter().GetResult();
+        await response.WriteAsJsonAsync(errorResponse);
         return response;
     }
 }

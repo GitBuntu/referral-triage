@@ -67,7 +67,7 @@ public class ReferralIntakeService : IReferralIntakeService
                 Status = "pending"
             };
 
-            await StoreReferralMetadataAsync(referralDocument);
+            await StoreReferralMetadataAsync(referralDocument, documentBytes.Length);
 
             return new ReferralIntakeResponse
             {
@@ -118,7 +118,7 @@ public class ReferralIntakeService : IReferralIntakeService
         }
     }
 
-    private async Task StoreReferralMetadataAsync(ReferralDocument document)
+    private async Task StoreReferralMetadataAsync(ReferralDocument document, int documentSize)
     {
         try
         {
@@ -126,7 +126,7 @@ public class ReferralIntakeService : IReferralIntakeService
             {
                 ReferralId = Guid.Parse(document.Id),
                 DocumentFormat = document.DocumentFormat,
-                DocumentSize = 0,
+                DocumentSize = documentSize,
                 DocumentStoragePath = document.BlobPath,
                 DocumentHash = document.DocumentHash,
                 Status = document.Status,

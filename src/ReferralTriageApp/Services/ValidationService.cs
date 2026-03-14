@@ -56,9 +56,12 @@ public class ValidationService : IValidationService
         }
         else
         {
-            var allowedFormats = (_configuration["AzureServiceSettings:AllowedFileTypes"] 
-                ?? "pdf,txt,png,jpg,jpeg").Split(',');
-            
+            var allowedFormats = (_configuration["AzureServiceSettings:AllowedFileTypes"]
+                ?? "pdf,txt,png,jpg,jpeg")
+                .Split(',')
+                .Select(f => f.Trim().ToLowerInvariant())
+                .ToList();
+
             if (!allowedFormats.Contains(request.DocumentFormat.ToLowerInvariant()))
             {
                 errors.Add($"DocumentFormat '{request.DocumentFormat}' is not supported. Allowed formats: {string.Join(", ", allowedFormats)}");
@@ -85,9 +88,12 @@ public class ValidationService : IValidationService
         }
         else
         {
-            var allowedSpecialties = (_configuration["AzureServiceSettings:AllowedSpecialties"] 
-                ?? "cardiology,orthopaedics,neurology,dermatology,general_medicine").Split(',');
-            
+            var allowedSpecialties = (_configuration["AzureServiceSettings:AllowedSpecialties"]
+                ?? "cardiology,orthopaedics,neurology,dermatology,general_medicine")
+                .Split(',')
+                .Select(s => s.Trim().ToLowerInvariant())
+                .ToList();
+
             if (!allowedSpecialties.Contains(record.Specialty.ToLowerInvariant()))
             {
                 errors.Add($"Specialty '{record.Specialty}' is not in allowed list: {string.Join(", ", allowedSpecialties)}");
@@ -101,9 +107,12 @@ public class ValidationService : IValidationService
         }
         else
         {
-            var allowedUrgencies = (_configuration["AzureServiceSettings:AllowedUrgencies"] 
-                ?? "routine,soon,urgent").Split(',');
-            
+            var allowedUrgencies = (_configuration["AzureServiceSettings:AllowedUrgencies"]
+                ?? "routine,soon,urgent")
+                .Split(',')
+                .Select(u => u.Trim().ToLowerInvariant())
+                .ToList();
+
             if (!allowedUrgencies.Contains(record.Urgency.ToLowerInvariant()))
             {
                 errors.Add($"Urgency '{record.Urgency}' is not in allowed list: {string.Join(", ", allowedUrgencies)}");
@@ -132,7 +141,7 @@ public class ValidationService : IValidationService
         var isValid = errors.Count == 0;
         if (!isValid)
         {
-            _logger.LogWarning("Triage record validation failed for {ReferralId}: {Errors}", 
+            _logger.LogWarning("Triage record validation failed for {ReferralId}: {Errors}",
                 record.Id, string.Join("; ", errors));
         }
 

@@ -1,5 +1,6 @@
 using System;
 using Azure.Storage.Blobs;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using ReferralTriageApp.Models;
@@ -104,23 +105,49 @@ public class TriageProcessingService : ITriageProcessingService
     {
         try
         {
-            var triageRecordEntity = new Infrastructure.TriageRecord
+            var referralGuid = Guid.Parse(triageRecord.ReferralId);
+            var serializedFields = System.Text.Json.JsonSerializer.Serialize(triageRecord.ExtractedFields);
+
+            // Check if a triage record already exists for this referral (idempotent)
+            var existingRecord = await _dbContext.TriageRecords
+                .FirstOrDefaultAsync(tr => tr.ReferralId == referralGuid);
+
+            if (existingRecord != null)
             {
-                TriageRecordId = Guid.NewGuid(),
-                ReferralId = Guid.Parse(triageRecord.ReferralId),
-                Specialty = triageRecord.Specialty,
-                Urgency = triageRecord.Urgency,
-                ExtractedFields = System.Text.Json.JsonSerializer.Serialize(triageRecord.ExtractedFields),
-                ClinicalSummary = triageRecord.ClinicalSummary,
-                CreatedAt = DateTime.UtcNow,
-                TriagedAt = triageRecord.TriagedAt,
-                ModifiedAt = DateTime.UtcNow
-            };
+                // Update existing record (retry/replay scenario)
+                existingRecord.Specialty = triageRecord.Specialty;
+                existingRecord.Urgency = triageRecord.Urgency;
+                existingRecord.ExtractedFields = serializedFields;
+                existingRecord.ClinicalSummary = triageRecord.ClinicalSummary;
+                existingRecord.TriagedAt = triageRecord.TriagedAt;
+                existingRecord.ModifiedAt = DateTime.UtcNow;
 
-            _dbContext.TriageRecords.Add(triageRecordEntity);
-            await _dbContext.SaveChangesAsync();
+                _dbContext.TriageRecords.Update(existingRecord);
+                await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Triage record stored in SQL Server: {ReferralId}", triageRecord.Id);
+                _logger.LogInformation("Triage record updated (idempotent retry) in SQL Server: {ReferralId}", triageRecord.Id);
+            }
+            else
+            {
+                // Insert new record
+                var triageRecordEntity = new Infrastructure.TriageRecord
+                {
+                    TriageRecordId = Guid.NewGuid(),
+                    ReferralId = referralGuid,
+                    Specialty = triageRecord.Specialty,
+                    Urgency = triageRecord.Urgency,
+                    ExtractedFields = serializedFields,
+                    ClinicalSummary = triageRecord.ClinicalSummary,
+                    CreatedAt = DateTime.UtcNow,
+                    TriagedAt = triageRecord.TriagedAt,
+                    ModifiedAt = DateTime.UtcNow
+                };
+
+                _dbContext.TriageRecords.Add(triageRecordEntity);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("Triage record stored in SQL Server: {ReferralId}", triageRecord.Id);
+            }
         }
         catch (Exception ex)
         {
