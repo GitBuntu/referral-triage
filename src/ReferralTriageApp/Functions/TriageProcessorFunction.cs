@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using ReferralTriageApp.Services;
 
@@ -9,13 +10,16 @@ namespace ReferralTriageApp.Functions;
 public class TriageProcessorFunction
 {
     private readonly ITriageProcessingService _triageProcessingService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<TriageProcessorFunction> _logger;
 
     public TriageProcessorFunction(
         ITriageProcessingService triageProcessingService,
+        IConfiguration configuration,
         ILogger<TriageProcessorFunction> logger)
     {
         _triageProcessingService = triageProcessingService;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -36,7 +40,8 @@ public class TriageProcessorFunction
             var documentFormat = GetDocumentFormat(fileName);
 
             // The blob path for retrieval
-            var blobPath = $"referrals/incoming/{referralId}/{fileName}";
+            var blobIncomingPath = _configuration["ReferralTriageSettings:BlobIncomingPath"] ?? "incoming";
+            var blobPath = $"{blobIncomingPath}/{referralId}/{fileName}";
 
             // Process triage
             await _triageProcessingService.ProcessTriageAsync(referralId, documentFormat, blobPath);
@@ -54,7 +59,7 @@ public class TriageProcessorFunction
     private string GetDocumentFormat(string fileName)
     {
         var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
-        
+
         return extension switch
         {
             "pdf" => "pdf",

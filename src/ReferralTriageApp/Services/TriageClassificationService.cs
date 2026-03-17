@@ -29,9 +29,14 @@ public class TriageClassificationService : ITriageClassificationService
         {
             _logger.LogInformation("Starting AI classification for referral: {ReferralId}", request.ReferralId);
 
-            var endpoint = _configuration["AzureServiceSettings:AzureOpenAiEndpoint"];
-            var key = _configuration["AzureServiceSettings:AzureOpenAiKey"];
-            var deploymentName = _configuration["AzureServiceSettings:AzureOpenAiDeploymentName"] ?? "gpt-4";
+            var endpoint = _configuration["ReferralTriageSettings:AzureOpenAiEndpoint"];
+            var key = _configuration["ReferralTriageSettings:AzureOpenAiKey"];
+            var deploymentName = _configuration["ReferralTriageSettings:AzureOpenAiDeploymentName"] ?? "gpt-4";
+
+            _logger.LogInformation("Endpoint loaded: {EndpointLoaded}, Key loaded: {KeyLoaded}, Deployment: {DeploymentName}",
+                !string.IsNullOrEmpty(endpoint),
+                !string.IsNullOrEmpty(key),
+                deploymentName);
 
             if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(key))
             {
@@ -58,17 +63,25 @@ public class TriageClassificationService : ITriageClassificationService
 
             var response = await client.GetChatCompletionsAsync(chatCompletionsOptions);
 
+            // Log token usage explicitly
+            _logger.LogInformation(
+                "GPT-4 Token Usage for Referral {ReferralId} - Prompt Tokens: {PromptTokens}, Completion Tokens: {CompletionTokens}, Total Tokens: {TotalTokens}",
+                request.ReferralId,
+                response.Value.Usage?.PromptTokens ?? 0,
+                response.Value.Usage?.CompletionTokens ?? 0,
+                response.Value.Usage?.TotalTokens ?? 0);
+
             var responseText = response.Value.Choices[0].Message.Content;
             _logger.LogInformation("AI response received for referral: {ReferralId}", request.ReferralId);
 
             // Parse response
             var triageResponse = ParseAIResponse(responseText);
-            
+
             return triageResponse;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during AI classification for referral: {ReferralId}", request.ReferralId);
+            _logger.LogError(ex, "Error during AI classification for referral: {ReferralId}. Exception Message: {ExceptionMessage}", request.ReferralId, ex.Message);
             // Return default/mock classification on error
             return GetMockClassification(request.ExtractedText);
         }
@@ -110,8 +123,8 @@ Respond with a JSON object containing:
     private string BuildUserPrompt(string referralText)
     {
         var maxLength = 3000;
-        var truncatedText = referralText.Length > maxLength 
-            ? referralText.Substring(0, maxLength) + "\n[... truncated due to length ...]" 
+        var truncatedText = referralText.Length > maxLength
+            ? referralText.Substring(0, maxLength) + "\n[... truncated due to length ...]"
             : referralText;
 
         return $@"Please analyze the following referral document and provide triage classification:
@@ -135,9 +148,9 @@ Provide your response as a valid JSON object only, with no additional text.";
             {
                 var jsonStr = responseText.Substring(jsonStart, jsonEnd - jsonStart + 1);
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                
+
                 var parsed = JsonSerializer.Deserialize<TriageResponseJson>(jsonStr, options);
-                
+
                 if (parsed != null)
                 {
                     return new TriageResponse
@@ -162,7 +175,7 @@ Provide your response as a valid JSON object only, with no additional text.";
 
     private string ValidateSpecialty(string? specialty)
     {
-        var allowedSpecialties = _configuration["AzureServiceSettings:AllowedSpecialties"] 
+        var allowedSpecialties = _configuration["ReferralTriageSettings:AllowedSpecialties"]
             ?? "cardiology,orthopaedics,neurology,dermatology,general_medicine";
         var specialtyList = allowedSpecialties.Split(',');
 
@@ -176,7 +189,7 @@ Provide your response as a valid JSON object only, with no additional text.";
 
     private string ValidateUrgency(string? urgency)
     {
-        var allowedUrgencies = _configuration["AzureServiceSettings:AllowedUrgencies"] 
+        var allowedUrgencies = _configuration["ReferralTriageSettings:AllowedUrgencies"]
             ?? "routine,soon,urgent";
         var urgencyList = allowedUrgencies.Split(',');
 
@@ -199,7 +212,7 @@ Provide your response as a valid JSON object only, with no additional text.";
         var hasCardiacKeywords = referralText.Contains("heart", StringComparison.OrdinalIgnoreCase) ||
                                  referralText.Contains("cardiac", StringComparison.OrdinalIgnoreCase) ||
                                  referralText.Contains("chest pain", StringComparison.OrdinalIgnoreCase);
-        
+
         var hasOrthoKeywords = referralText.Contains("bone", StringComparison.OrdinalIgnoreCase) ||
                               referralText.Contains("fracture", StringComparison.OrdinalIgnoreCase) ||
                               referralText.Contains("orthop", StringComparison.OrdinalIgnoreCase);

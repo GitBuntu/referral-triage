@@ -41,8 +41,8 @@ public class DocumentExtractionService : IDocumentExtractionService
             }
 
             // For PDF and images, use Document Intelligence API
-            var endpoint = _configuration["AzureServiceSettings:DocumentIntelligenceEndpoint"];
-            var key = _configuration["AzureServiceSettings:DocumentIntelligenceKey"];
+            var endpoint = _configuration["ReferralTriageSettings:DocumentIntelligenceEndpoint"];
+            var key = _configuration["ReferralTriageSettings:DocumentIntelligenceKey"];
 
             if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(key))
             {
@@ -53,7 +53,7 @@ public class DocumentExtractionService : IDocumentExtractionService
             var client = new DocumentIntelligenceClient(new Uri(endpoint), new AzureKeyCredential(key));
 
             // Get blob client and generate SAS URI (for private containers)
-            var containerName = _configuration["AzureServiceSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             var blobClient = containerClient.GetBlobClient(blobPath);
 
@@ -97,7 +97,7 @@ public class DocumentExtractionService : IDocumentExtractionService
     {
         try
         {
-            var containerName = _configuration["AzureServiceSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             var blobClient = containerClient.GetBlobClient(blobPath);
 
@@ -118,7 +118,7 @@ public class DocumentExtractionService : IDocumentExtractionService
     {
         try
         {
-            var containerName = _configuration["AzureServiceSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             var blobClient = containerClient.GetBlobClient(blobPath);
 

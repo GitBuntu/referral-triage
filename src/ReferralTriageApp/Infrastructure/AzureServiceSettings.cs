@@ -1,6 +1,6 @@
 namespace ReferralTriageApp.Infrastructure;
 
-public class AzureServiceSettings
+public class ReferralTriageSettings
 {
     public string? BlobStorageAccount { get; set; }
     public string? BlobContainer { get; set; }

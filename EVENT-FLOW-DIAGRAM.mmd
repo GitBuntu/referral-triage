@@ -1,0 +1,49 @@
+graph TD
+    A["1️⃣ REFERRAL INTAKE"] -->|HTTP POST /referrals/intake| B["ReferralIntakeFunction<br/>HttpTrigger"]
+
+    B -->|Validates Document| C{"Document Valid?<br/>- Format: pdf,txt,png,jpg,jpeg<br/>- Size: 1B-50MB"}
+
+    C -->|❌ Invalid| D["❌ Return 400 Error"]
+    C -->|✅ Valid| E["Upload to Blob Storage<br/>referrals/incoming/{referralId}/"]
+
+    E -->|Emit Event| F["📨 Referral-Submitted Event<br/>ReferralId, DocFormat,<br/>DocHash, SubmittedAt"]
+
+    F -->|Store| G["DomainEventLog<br/>EventType: 'Referral-Submitted'"]
+    F -->|Create Row| H["Referral Table<br/>- ReferralId<br/>- DocumentPath<br/>- Status: 'submitted'<br/>- SubmittedAt"]
+
+    E -->|Triggers| I["2️⃣ TRIAGE PROCESSING<br/>BlobTrigger"]
+
+    I -->|Read Document| J["Extract Text<br/>Using Document Intelligence API"]
+
+    J -->|If Image Format| K["Apply OCR"]
+
+    J -->|Extracted Text| L["AI Classification<br/>Send to Azure OpenAI<br/>gpt-4o Model"]
+
+    L -->|Returns| M["Classification Result<br/>- Specialty: cardiology|orthopaedics|neurology|dermatology|general_medicine<br/>- Urgency: routine|soon|urgent<br/>- ExtractedFields: patient_name, dob, symptoms, duration, red_flags<br/>- ClinicalSummary &lt; 500 chars"]
+
+    M -->|Validate| N{"All Validations<br/>Pass?"}
+
+    N -->|❌ Failed| O["❌ Log Error<br/>Dead Letter Processing"]
+    N -->|✅ Passed| P["Create TriageRecord<br/>- TriageRecordId<br/>- ReferralId (FK)<br/>- Specialty, Urgency<br/>- ExtractedFields, Summary"]
+
+    P -->|Emit Event| Q["📨 Referral-Triaged Event<br/>ReferralId, Specialty,<br/>Urgency, ExtractedFields,<br/>ClinicalSummary"]
+
+    Q -->|Store| R["DomainEventLog<br/>EventType: 'Referral-Triaged'"]
+    Q -->|Update Status| S["Update Referral Table<br/>Status: 'triaged'"]
+
+    R -->|Downstream Event| T["🔄 Consumed by<br/>Clinical Workflow Service<br/>Initiates Specialty Queue"]
+
+    U["3️⃣ DAILY METRICS AGGREGATION"] -->|Timer Trigger| V["⏰ MetricsAggregatorFunction<br/>Runs Daily @ 02:00 UTC<br/>'0 0 2 * * *'"]
+
+    V -->|Query Previous Day| W["Query Referral & TriageRecord"]
+
+    W -->|Aggregate| X["Calculate Metrics<br/>- Referrals per Specialty<br/>- Urgent vs Routine Count<br/>- Avg Processing Latency<br/>- Missing Field Rates<br/>- Processing Success Rate"]
+
+    X -->|Store| Y["Metrics Table<br/>MetricsDate: yesterday<br/>MetricsData: JSON"]
+
+    style A fill:#e1f5ff
+    style I fill:#fff3e0
+    style U fill:#f3e5f5
+    style T fill:#e8f5e9
+    style D fill:#ffebee
+    style O fill:#ffebee

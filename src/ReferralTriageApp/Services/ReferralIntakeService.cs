@@ -52,7 +52,8 @@ public class ReferralIntakeService : IReferralIntakeService
             var documentHash = CalculateSHA256Hash(documentBytes);
 
             // Upload to Blob Storage
-            var blobPath = $"referrals/incoming/{referralId}/{referralId}.{GetFileExtension(request.DocumentFormat)}";
+            var blobIncomingPath = _configuration["ReferralTriageSettings:BlobIncomingPath"] ?? "incoming";
+            var blobPath = $"{blobIncomingPath}/{referralId}/{referralId}.{GetFileExtension(request.DocumentFormat)}";
             var blobUri = await UploadDocumentToBlobAsync(documentBytes, blobPath);
 
             // Store referral metadata in SQL DB
@@ -95,7 +96,7 @@ public class ReferralIntakeService : IReferralIntakeService
     {
         try
         {
-            var containerName = _configuration["AzureServiceSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
 
             // Ensure container exists
