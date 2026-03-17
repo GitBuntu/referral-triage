@@ -55,7 +55,6 @@ public class ReferralIntakeFunction
             // Return success response
             var successResponse = req.CreateResponse(HttpStatusCode.Accepted);
             await successResponse.WriteAsJsonAsync(response);
-            successResponse.Headers.Add("Content-Type", "application/json");
             return successResponse;
         }
         catch (ArgumentException ex)
@@ -75,7 +74,6 @@ public class ReferralIntakeFunction
     {
         var response = req.CreateResponse(statusCode);
         var errorResponse = new ErrorResponse { Message = message };
-        response.Headers.Add("Content-Type", "application/json");
         await response.WriteAsJsonAsync(errorResponse);
         return response;
     }

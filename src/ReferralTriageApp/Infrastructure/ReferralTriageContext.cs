@@ -27,25 +27,6 @@ public partial class ReferralTriageContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<DomainEventLog>(entity =>
-        {
-            entity.HasKey(e => e.DomainEventId).HasName("PK__DomainEv__A10C7D444BB7D679");
-
-            entity.ToTable("DomainEventLog");
-
-            entity.HasIndex(e => e.CreatedAt, "IX_DomainEventLog_CreatedAt");
-
-            entity.HasIndex(e => e.EventType, "IX_DomainEventLog_EventType");
-
-            entity.HasIndex(e => e.ReferralId, "IX_DomainEventLog_ReferralId");
-
-            entity.Property(e => e.DomainEventId).ValueGeneratedNever();
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
-            entity.Property(e => e.EventType)
-                .HasMaxLength(100)
-                .IsUnicode(false);
-        });
-
         modelBuilder.Entity<Referral>(entity =>
         {
             entity.HasKey(e => e.ReferralId).HasName("PK__Referral__A2C4A9667F644C90");
@@ -127,6 +108,18 @@ public partial class ReferralTriageContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(255);
             entity.Property(e => e.ModifiedDate).HasDefaultValueSql("(getutcdate())");
             entity.Property(e => e.Username).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<DomainEventLog>(entity =>
+        {
+            entity.HasKey(e => e.DomainEventId).HasName("PK__DomainEv__3214EC07FF9FB24B");
+
+            entity.ToTable("DomainEventLog");
+
+            entity.Property(e => e.DomainEventId).ValueGeneratedNever();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
+            entity.Property(e => e.EventType).HasMaxLength(255);
+            entity.Property(e => e.Payload).HasColumnType("nvarchar(max)");
         });
 
         OnModelCreatingPartial(modelBuilder);

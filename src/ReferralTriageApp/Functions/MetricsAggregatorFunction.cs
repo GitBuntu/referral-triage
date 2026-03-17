@@ -20,7 +20,7 @@ public class MetricsAggregatorFunction
     }
 
     [Function("MetricsAggregator")]
-    public async Task Run([TimerTrigger("%AzureServiceSettings:MetricsAggregationSchedule%")] TimerInfo myTimer)
+    public async Task Run([TimerTrigger("%MetricsAggregationSchedule%")] TimerInfo myTimer)
     {
         _logger.LogInformation("MetricsAggregator timer trigger function executed at: {Now}", DateTime.UtcNow);
 

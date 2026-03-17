@@ -79,7 +79,7 @@ referral-triage/
 │       │   ├── MetricsAggregationService.cs
 │       │   └── ValidationService.cs
 │       ├── Infrastructure/
-│       │   ├── AzureServiceSettings.cs
+│       │   ├── ReferralTriageSettings.cs
 │       │   └── DbContext.cs (Entity Framework Core)
 │       ├── Program.cs
 │       ├── ReferralTriageApp.csproj
@@ -114,7 +114,7 @@ Update `src/ReferralTriageApp/local.settings.json` with connection strings for l
 
 ```json
 {
-  "AzureServiceSettings": {
+  "ReferralTriageSettings": {
     "DocumentIntelligenceEndpoint": "https://YOUR_REGION.api.cognitive.microsoft.com/",
     "DocumentIntelligenceKey": "YOUR_KEY",
     "AzureOpenAiEndpoint": "https://YOUR_RESOURCE.openai.azure.com/",

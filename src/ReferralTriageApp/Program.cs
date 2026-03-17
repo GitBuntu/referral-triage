@@ -3,18 +3,28 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Azure.Identity;
 using Azure.Storage.Blobs;
+using Azure.Monitor.OpenTelemetry.AspNetCore;
 using ReferralTriageApp.Services;
 using ReferralTriageApp.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
 var host = new HostBuilder()
     .ConfigureFunctionsWorkerDefaults()
+    .ConfigureAppConfiguration((context, configBuilder) =>
+    {
+        configBuilder
+            .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables();
+    })
     .ConfigureServices((context, services) =>
     {
         var config = context.Configuration;
 
         // Register configuration
         services.AddSingleton(config);
+
+        // Add Azure Monitor/Application Insights
+        services.AddOpenTelemetry().UseAzureMonitor();
 
         // Register Azure Storage Blob client
         var blobConnectionString = config.GetConnectionString("BlobStorage")
@@ -36,7 +46,7 @@ var host = new HostBuilder()
         services.AddScoped<IValidationService, ValidationService>();
 
         // Register configuration options
-        services.Configure<AzureServiceSettings>(config.GetSection("AzureServiceSettings"));
+        services.Configure<ReferralTriageSettings>(config.GetSection("ReferralTriageSettings"));
 
         // Add logging
         services.AddLogging();
