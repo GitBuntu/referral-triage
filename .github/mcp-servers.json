@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "openspec": {
+      "command": "npx",
+      "args": ["@fission-ai/openspec"]
+    }
+  }
+}
