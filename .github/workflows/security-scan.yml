@@ -31,9 +31,6 @@ jobs:
           project: 'Referral Triage'
           path: '.'
           format: 'JSON'
-          args: >
-            --enable-assembly
-            --enable-javascript
 
       - name: Upload Dependency-Check Report
         if: always()
