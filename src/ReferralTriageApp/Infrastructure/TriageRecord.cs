@@ -23,5 +23,7 @@ public partial class TriageRecord
 
     public DateTime ModifiedAt { get; set; }
 
+    public decimal? ConfidenceScore { get; set; }
+
     public virtual Referral Referral { get; set; } = null!;
 }

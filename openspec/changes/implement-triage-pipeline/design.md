@@ -139,12 +139,12 @@ if (triageResponse == null)
 ```json
 {
   "Values": {
-    "ReferralTriageSettings:BlobIncomingPath": "incoming",
-    "ReferralTriageSettings:DocumentIntelligenceEndpoint": "https://...",
-    "ReferralTriageSettings:DocumentIntelligenceKey": "***",
-    "ReferralTriageSettings:AzureOpenAiEndpoint": "https://...",
-    "ReferralTriageSettings:AzureOpenAiKey": "***",
-    "ReferralTriageSettings:AzureOpenAiDeploymentName": "gpt-4",
+    "ReferralTriageApp:BlobIncomingPath": "incoming",
+    "ReferralTriageApp:DocumentIntelligenceEndpoint": "https://...",
+    "ReferralTriageApp:DocumentIntelligenceKey": "***",
+    "ReferralTriageApp:AzureOpenAiEndpoint": "https://...",
+    "ReferralTriageApp:AzureOpenAiKey": "***",
+    "ReferralTriageApp:AzureOpenAiDeploymentName": "gpt-4",
     "MetricsAggregationSchedule": "0 0 2 * * *",
     "AzureWebJobsStorage": "DefaultEndpointsProtocol=https;..."
   },
@@ -174,6 +174,46 @@ if (triageResponse == null)
 - Local: POST to `/api/referrals/intake` with test document
 - Verify Blob creation, SQL Referral record, status transitions
 - Trigger metrics aggregation manually and verify DailyMetrics
+
+---
+
+### 6. Quality Gates: Confidence Score and Required Fields Validation
+**Decision:** Before marking a triage as "completed", validate:
+1. `confidence_score >= threshold` (configurable, default 0.90)
+2. All required extracted fields are non-empty (patient_name, dob, symptoms, duration, red_flags)
+
+If either check fails → mark status as "pending_review" and emit to review queue (or flag for manual inspection).
+
+**Rationale:**
+- Self-assessment: GPT-4o provides confidence_score as part of function response; leveraging it avoids extra API calls
+- Completeness check: Catches cases where GPT returned empty fields or partial extractions, regardless of confidence
+- Human workload reduction: High-confidence + complete extractions bypass review entirely; only edge cases (1-10% of volume) need human eyes
+- Aligns with operational goal: Reduce human workload by auto-completing high-quality triages while catching ambiguous/incomplete cases
+
+**Implementation in TriageProcessingService:**
+```csharp
+// After classification succeeds
+if (triageResponse.ConfidenceScore >= _confidenceThreshold &&
+    !string.IsNullOrEmpty(triageResponse.ExtractedFields.PatientName) &&
+    !string.IsNullOrEmpty(triageResponse.ExtractedFields.DOB) &&
+    !string.IsNullOrEmpty(triageResponse.ExtractedFields.Symptoms) &&
+    !string.IsNullOrEmpty(triageResponse.ExtractedFields.Duration) &&
+    !string.IsNullOrEmpty(triageResponse.ExtractedFields.RedFlags))
+{
+    // Mark as "completed"
+    triageRecord.Status = "completed";
+}
+else
+{
+    // Mark as "pending_review"; ops will decide next steps
+    triageRecord.Status = "pending_review";
+    // Optionally: emit to separate review queue for visibility
+}
+```
+
+**Configuration:**
+- Add to local.settings.json: `ReferralTriageApp:ConfidenceThreshold` (default: 0.90)
+- Add to TriageRecord in database: `ConfidenceScore` decimal column
 
 ---
 
@@ -235,8 +275,8 @@ if (triageResponse == null)
 
 ## Open Questions
 
-1. **OpenAI function calling schema**: Should confidence_score be required, or optional with default? (Current design: optional, defaults to 0.5)
+1. **DLQ inspection workflow**: How will ops teams review failed referrals? Manual query of queue, or integrate with monitoring dashboard? (Defer to v2)
 
-2. **DLQ inspection workflow**: How will ops teams review failed referrals? Manual query of queue, or integrate with monitoring dashboard? (Defer to v2)
+2. **Retry backoff timing**: Should exponential backoff be (1s, 2s) or different? (Current proposal: conservative backoff to avoid overwhelming services)
 
-3. **Retry backoff timing**: Should exponential backoff be (1s, 2s) or different? (Current proposal: conservative backoff to avoid overwhelming services)
+3. **Review queue implementation**: Should pending_review items go to a separate Storage Queue, or tracked entirely in TriageRecord status? (Current proposal: track in status; separate queue is a v2 optimization)

@@ -189,15 +189,58 @@ Configure via `local.settings.json` or Azure Function App Settings:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `BlobStorageAccount` | Blob storage account name | `referralstoragedev` |
-| `BlobContainer` | Blob container name | `referrals` |
-| `SqlServerDatabase` | SQL Server database name | `referral_triage` |
-| `TriageRecordsTableName` | SQL Server table name | `triage_records` |
-| `MaxFileSizeBytes` | Max upload file size | `52428800` (50 MB) |
-| `AllowedFileTypes` | Comma-separated file types | `pdf,txt,png,jpg,jpeg` |
-| `AllowedSpecialties` | Comma-separated specialties | `cardiology,orthopaedics,neurology,dermatology,general_medicine` |
-| `AllowedUrgencies` | Comma-separated urgency levels | `routine,soon,urgent` |
-| `MetricsAggregationSchedule` | CRON expression for timer | `0 0 2 * * *` (daily 2 AM) |
+| `ReferralTriageApp:BlobStorageAccount` | Blob storage account name | `referralstoragedev` |
+| `ReferralTriageApp:BlobContainer` | Blob container name | `referrals` |
+| `ReferralTriageApp:BlobIncomingPath` | Blob path where incoming docs are stored | `incoming` |
+| `ReferralTriageApp:SqlServerDatabase` | SQL Server database name | `referral_triage` |
+| `ReferralTriageApp:TriageRecordsTableName` | SQL Server table name | `triage_records` |
+| `ReferralTriageApp:MaxFileSizeBytes` | Max upload file size | `52428800` (50 MB) |
+| `ReferralTriageApp:AllowedFileTypes` | Comma-separated file types | `pdf,txt,png,jpg,jpeg` |
+| `ReferralTriageApp:AllowedSpecialties` | Comma-separated specialties | `cardiology,orthopaedics,neurology,dermatology,general_medicine` |
+| `ReferralTriageApp:AllowedUrgencies` | Comma-separated urgency levels | `routine,soon,urgent` |
+| `ReferralTriageApp:MetricsAggregationSchedule` | CRON expression for timer | `0 0 2 * * *` (daily 2 AM) |
+| `ReferralTriageApp:ConfidenceThreshold` | AI confidence score threshold for auto-completion (0.0-1.0) | `0.90` |
+| `ReferralTriageApp:DLQName` | Azure Storage Queue name for dead-lettered referrals | `referral-dlq` |
+
+### Quality Gates Configuration
+
+The triage pipeline applies quality gates to determine whether a referral can be auto-completed or requires manual review:
+
+1. **Confidence Score Gate**: AI confidence score must be >= `ReferralTriageApp:ConfidenceThreshold`
+2. **Required Fields Gate**: All required extracted fields must be populated (non-empty):
+   - `patient_name`
+   - `dob` (date of birth)
+   - `symptoms`
+   - `duration`
+   - `red_flags`
+
+If **both** gates pass, referral status is set to `"completed"` (auto-completion).
+If **either** gate fails, referral status is set to `"pending_review"` (manual review required).
+
+### Dead-Letter Queue
+
+Failed referrals are emitted to an Azure Storage Queue specified by `ReferralTriageApp:DLQName`. Each DLQ message contains:
+
+```json
+{
+  "referralId": "550e8400-e29b-41d4-a716-446655440000",
+  "failureReason": "document_extraction_failed|classification_failed|validation_failed|...",
+  "errorMessage": "Detailed error message",
+  "timestamp": "2024-03-08T10:30:00Z",
+  "retryCount": 2
+}
+```
+
+Failure reasons:
+- `document_extraction_failed` - Text extraction from document failed after max retries
+- `classification_failed` - AI classification failed after max retries
+- `validation_failed` - Triage record validation failed
+- `blob_not_found` - Document blob not found in Blob Storage
+- `blob_access_denied` - Access denied when reading document blob
+- `unsupported_document_format` - File extension not supported
+- `invalid_input` - Referral ID or file name missing/invalid
+- `operation_timeout` - Processing timed out
+- `unexpected_error` - Unexpected application error
 
 ## Domain Models
 

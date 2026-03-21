@@ -19,6 +19,7 @@
 
     <!-- Azure SDK -->
     <PackageReference Include="Azure.Storage.Blobs" Version="12.19.0" />
+    <PackageReference Include="Azure.Storage.Queues" Version="12.17.0" />
     <PackageReference Include="Azure.Identity" Version="1.10.4" />
 
     <!-- Document Intelligence (OCR) -->
