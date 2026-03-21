@@ -158,7 +158,7 @@ public class TriageClassificationService : ITriageClassificationService
                 response.Value.Usage?.TotalTokens ?? 0);
 
             // Check if we got a function call
-            if (response.Value.Choices[0].FinishReason == FUNCTION_CALL_FINISH_REASON)
+            if (response.Value.Choices[0].FinishReason?.ToString() == FUNCTION_CALL_FINISH_REASON)
             {
                 var toolCall = response.Value.Choices[0].Message.ToolCalls[0];
 
@@ -382,13 +382,13 @@ Provide your response as a valid JSON object only, with no additional text.";
         [JsonPropertyName("urgency")]
         public string? Urgency { get; set; }
 
-        [JsonPropertyName("extractedFields")]
+        [JsonPropertyName("extracted_fields")]
         public Dictionary<string, string>? ExtractedFields { get; set; }
 
-        [JsonPropertyName("clinicalSummary")]
+        [JsonPropertyName("clinical_summary")]
         public string? ClinicalSummary { get; set; }
 
-        [JsonPropertyName("confidenceScore")]
+        [JsonPropertyName("confidence_score")]
         public double ConfidenceScore { get; set; }
     }
 }

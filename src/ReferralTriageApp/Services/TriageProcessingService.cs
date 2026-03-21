@@ -69,6 +69,7 @@ public class TriageProcessingService : ITriageProcessingService
                     "document_extraction_failed",
                     "Extracted text is empty or whitespace",
                     retryCount: MAX_RETRIES);
+                await UpdateReferralStatusAsync(referralId, "failed");
                 return;
             }
 
@@ -97,6 +98,7 @@ public class TriageProcessingService : ITriageProcessingService
                     "classification_failed",
                     "AI classification returned null after max retries",
                     retryCount: MAX_RETRIES);
+                await UpdateReferralStatusAsync(referralId, "failed");
                 return;
             }
 
@@ -127,6 +129,7 @@ public class TriageProcessingService : ITriageProcessingService
                     "validation_failed",
                     $"Validation errors: {string.Join("; ", validationErrors)}",
                     retryCount: 0);
+                await UpdateReferralStatusAsync(referralId, "failed");
                 return;
             }
 
@@ -242,7 +245,7 @@ public class TriageProcessingService : ITriageProcessingService
                 existingRecord.Urgency = triageRecord.Urgency;
                 existingRecord.ExtractedFields = serializedFields;
                 existingRecord.ClinicalSummary = triageRecord.ClinicalSummary;
-                existingRecord.ConfidenceScore = triageRecord.ConfidenceScore.HasValue ? (decimal)triageRecord.ConfidenceScore : null;
+                existingRecord.ConfidenceScore = triageRecord.ConfidenceScore.HasValue ? (decimal?)triageRecord.ConfidenceScore : null;
                 existingRecord.TriagedAt = triageRecord.TriagedAt;
                 existingRecord.ModifiedAt = DateTime.UtcNow;
 
@@ -262,7 +265,7 @@ public class TriageProcessingService : ITriageProcessingService
                     Urgency = triageRecord.Urgency,
                     ExtractedFields = serializedFields,
                     ClinicalSummary = triageRecord.ClinicalSummary,
-                    ConfidenceScore = triageRecord.ConfidenceScore.HasValue ? (decimal)triageRecord.ConfidenceScore : null,
+                    ConfidenceScore = triageRecord.ConfidenceScore.HasValue ? (decimal?)triageRecord.ConfidenceScore : null,
                     CreatedAt = DateTime.UtcNow,
                     TriagedAt = triageRecord.TriagedAt,
                     ModifiedAt = DateTime.UtcNow

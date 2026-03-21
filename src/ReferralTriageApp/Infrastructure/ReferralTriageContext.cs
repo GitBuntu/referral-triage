@@ -19,20 +19,24 @@ public partial class ReferralTriageContext : DbContext
 
     public virtual DbSet<Referral> Referral { get; set; }
 
-    public virtual DbSet<SchemaVersions> SchemaVersions { get; set; }
+    public virtual DbSet<SchemaVersion> SchemaVersion { get; set; }
 
     public virtual DbSet<TriageRecord> TriageRecord { get; set; }
 
-    public virtual DbSet<Users> Users { get; set; }
+    public virtual DbSet<User> User { get; set; }
 
     // Alias properties for backward compatibility with plural naming
     public virtual DbSet<DomainEventLog> DomainEventLogs => DomainEventLog;
     public virtual DbSet<Referral> Referrals => Referral;
+    public virtual DbSet<SchemaVersion> SchemaVersions => SchemaVersion;
     public virtual DbSet<TriageRecord> TriageRecords => TriageRecord;
+    public virtual DbSet<User> Users => User;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
-        => optionsBuilder.UseSqlServer("Server=localhost;Database=ReferralTriage;Integrated Security=true;TrustServerCertificate=true;");
+    {
+        // Configuration is provided via dependency injection in Program.cs
+        // This method intentionally left empty to avoid hard-coding connection strings
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -79,7 +83,7 @@ public partial class ReferralTriageContext : DbContext
             entity.Property(e => e.SubmittedBy).HasMaxLength(255);
         });
 
-        modelBuilder.Entity<SchemaVersions>(entity =>
+        modelBuilder.Entity<SchemaVersion>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("PK_SchemaVersions_Id");
 
@@ -123,7 +127,7 @@ public partial class ReferralTriageContext : DbContext
                 .HasConstraintName("FK__TriageRec__Refer__5AEE82B9");
         });
 
-        modelBuilder.Entity<Users>(entity =>
+        modelBuilder.Entity<User>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("PK__Users__3214EC074A0A87F6");
 

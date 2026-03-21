@@ -15,6 +15,9 @@ public class DeadLetterService : IDeadLetterService
     private readonly QueueServiceClient _queueServiceClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DeadLetterService> _logger;
+    private QueueClient? _queueClient;
+    private bool _queueInitialized = false;
+    private readonly object _lockObject = new();
 
     public DeadLetterService(
         QueueServiceClient queueServiceClient,
@@ -26,15 +29,34 @@ public class DeadLetterService : IDeadLetterService
         _logger = logger;
     }
 
+    private async Task<QueueClient> EnsureQueueInitializedAsync()
+    {
+        lock (_lockObject)
+        {
+            if (_queueInitialized && _queueClient != null)
+            {
+                return _queueClient;
+            }
+        }
+
+        var dlqName = _configuration["ReferralTriageApp:DLQName"] ?? "referral-dlq";
+        _queueClient = _queueServiceClient.GetQueueClient(dlqName);
+        await _queueClient.CreateIfNotExistsAsync();
+
+        lock (_lockObject)
+        {
+            _queueInitialized = true;
+        }
+
+        _logger.LogInformation("Dead-letter queue initialized: {QueueName}", dlqName);
+        return _queueClient;
+    }
+
     public async Task EmitToDeadLetterAsync(string referralId, string failureReason, string errorMessage, int retryCount)
     {
         try
         {
-            var dlqName = _configuration["ReferralTriageApp:DLQName"] ?? "referral-dlq";
-            var queueClient = _queueServiceClient.GetQueueClient(dlqName);
-
-            // Create queue if it doesn't exist
-            await queueClient.CreateIfNotExistsAsync();
+            var queueClient = await EnsureQueueInitializedAsync();
 
             // Create the dead-letter message
             var dlqMessage = new

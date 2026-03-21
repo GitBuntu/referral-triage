@@ -34,13 +34,19 @@ public class TriageProcessorFunction
         string fileName,
         FunctionContext context)
     {
-        var blobPath = $"referrals/incoming/{referralId}/{fileName}";
+        // Note: BlobTrigger binding is hard-coded to "referrals/incoming/" path.
+        // If ReferralTriageApp:BlobIncomingPath configuration changes, ensure this trigger path is updated accordingly.
+        // TODO: Consider making trigger path configurable via binding expression if deployment flexibility is needed.
+
+        // Resolve the actual blob path using configuration (accessible in error handlers)
+        var blobIncomingPath = _configuration["ReferralTriageApp:BlobIncomingPath"] ?? "incoming";
+        var resolvedBlobPath = $"{blobIncomingPath}/{referralId}/{fileName}";
 
         try
         {
             _logger.LogInformation(
-                "TriageProcessor triggered for referral: {ReferralId}, file: {FileName}, blobPath: {BlobPath}",
-                referralId, fileName, blobPath);
+                "TriageProcessor triggered for referral: {ReferralId}, file: {FileName}, blobPath: {ResolvedBlobPath}",
+                referralId, fileName, resolvedBlobPath);
 
             // Validate inputs
             if (string.IsNullOrWhiteSpace(referralId))
@@ -81,9 +87,7 @@ public class TriageProcessorFunction
                 return;
             }
 
-            // The blob path for retrieval
-            var blobIncomingPath = _configuration["ReferralTriageApp:BlobIncomingPath"] ?? "incoming";
-            var resolvedBlobPath = $"{blobIncomingPath}/{referralId}/{fileName}";
+
 
             // Process triage (TriageProcessingService handles its own retry/DLQ logic)
             await _triageProcessingService.ProcessTriageAsync(referralId, documentFormat, resolvedBlobPath);
@@ -97,12 +101,12 @@ public class TriageProcessorFunction
             // Blob not found - application error, not infrastructure failure
             _logger.LogError(
                 ex,
-                "Blob not found for referral {ReferralId}: {BlobPath}. Status: {Status}",
-                referralId, blobPath, ex.Status);
+                "Blob not found for referral {ReferralId}: {ResolvedBlobPath}. Status: {Status}",
+                referralId, resolvedBlobPath, ex.Status);
             await _deadLetterService.EmitToDeadLetterAsync(
                 referralId,
                 "blob_not_found",
-                $"Document blob not found: {blobPath}",
+                $"Document blob not found: {resolvedBlobPath}",
                 retryCount: 0);
         }
         catch (Azure.RequestFailedException ex) when (ex.Status == 403)
@@ -110,12 +114,12 @@ public class TriageProcessorFunction
             // Access denied - permission/authentication issue
             _logger.LogError(
                 ex,
-                "Access denied to blob for referral {ReferralId}: {BlobPath}. Status: {Status}",
-                referralId, blobPath, ex.Status);
+                "Access denied to blob for referral {ReferralId}: {ResolvedBlobPath}. Status: {Status}",
+                referralId, resolvedBlobPath, ex.Status);
             await _deadLetterService.EmitToDeadLetterAsync(
                 referralId,
                 "blob_access_denied",
-                $"Access denied to document blob: {blobPath}",
+                $"Access denied to document blob: {resolvedBlobPath}",
                 retryCount: 0);
         }
         catch (Azure.RequestFailedException ex) when (ex.Status >= 500)
@@ -123,8 +127,8 @@ public class TriageProcessorFunction
             // Server error - transient failure, re-throw to trigger Azure Functions retry policy
             _logger.LogError(
                 ex,
-                "Azure service error accessing blob for referral {ReferralId}: {BlobPath}. Status: {Status}",
-                referralId, blobPath, ex.Status);
+                "Azure service error accessing blob for referral {ReferralId}: {ResolvedBlobPath}. Status: {Status}",
+                referralId, resolvedBlobPath, ex.Status);
             throw;
         }
         catch (OperationCanceledException ex)

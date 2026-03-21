@@ -45,8 +45,11 @@ public class ReferralIntakeService : IReferralIntakeService
 
             // Generate unique ReferralId
             var referralId = Guid.NewGuid().ToString();
-            _logger.LogInformation("INTAKE_PIPELINE_START: ReferralId={ReferralId}, DocumentFormat={DocumentFormat}, PatientMRN={PatientMRN}",
-                referralId, request.DocumentFormat, request.PatientMRN);
+            var patientMrnHash = request.PatientMRN is null
+                ? null
+                : Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(request.PatientMRN)));
+            _logger.LogInformation("INTAKE_PIPELINE_START: ReferralId={ReferralId}, DocumentFormat={DocumentFormat}, PatientMRNHash={PatientMRNHash}",
+                referralId, request.DocumentFormat, patientMrnHash);
 
             // Calculate document hash
             var documentBytes = Convert.FromBase64String(request.DocumentData);
