@@ -15,23 +15,51 @@ public partial class ReferralTriageContext : DbContext
     {
     }
 
-    public virtual DbSet<DomainEventLog> DomainEventLogs { get; set; }
+    public virtual DbSet<DomainEventLog> DomainEventLog { get; set; }
 
-    public virtual DbSet<Referral> Referrals { get; set; }
+    public virtual DbSet<Referral> Referral { get; set; }
 
-    public virtual DbSet<SchemaVersion> SchemaVersions { get; set; }
+    public virtual DbSet<SchemaVersion> SchemaVersion { get; set; }
 
-    public virtual DbSet<TriageRecord> TriageRecords { get; set; }
+    public virtual DbSet<TriageRecord> TriageRecord { get; set; }
 
-    public virtual DbSet<User> Users { get; set; }
+    public virtual DbSet<User> User { get; set; }
+
+    // Alias properties for backward compatibility with plural naming
+    public virtual DbSet<DomainEventLog> DomainEventLogs => DomainEventLog;
+    public virtual DbSet<Referral> Referrals => Referral;
+    public virtual DbSet<SchemaVersion> SchemaVersions => SchemaVersion;
+    public virtual DbSet<TriageRecord> TriageRecords => TriageRecord;
+    public virtual DbSet<User> Users => User;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        // Configuration is provided via dependency injection in Program.cs
+        // This method intentionally left empty to avoid hard-coding connection strings
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<DomainEventLog>(entity =>
+        {
+            entity.HasKey(e => e.DomainEventId).HasName("PK__DomainEv__A10C7D444BB7D679");
+
+            entity.HasIndex(e => e.CreatedAt, "IX_DomainEventLog_CreatedAt");
+
+            entity.HasIndex(e => e.EventType, "IX_DomainEventLog_EventType");
+
+            entity.HasIndex(e => e.ReferralId, "IX_DomainEventLog_ReferralId");
+
+            entity.Property(e => e.DomainEventId).ValueGeneratedNever();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
+            entity.Property(e => e.EventType)
+                .HasMaxLength(100)
+                .IsUnicode(false);
+        });
+
         modelBuilder.Entity<Referral>(entity =>
         {
             entity.HasKey(e => e.ReferralId).HasName("PK__Referral__A2C4A9667F644C90");
-
-            entity.ToTable("Referral");
 
             entity.HasIndex(e => e.CreatedAt, "IX_Referral_CreatedAt");
 
@@ -67,7 +95,7 @@ public partial class ReferralTriageContext : DbContext
         {
             entity.HasKey(e => e.TriageRecordId).HasName("PK__TriageRe__1A2EACC4674C4D66");
 
-            entity.ToTable("TriageRecord");
+            entity.HasIndex(e => e.ConfidenceScore, "IX_TriageRecord_ConfidenceScore");
 
             entity.HasIndex(e => e.CreatedAt, "IX_TriageRecord_CreatedAt");
 
@@ -81,6 +109,9 @@ public partial class ReferralTriageContext : DbContext
 
             entity.Property(e => e.TriageRecordId).ValueGeneratedNever();
             entity.Property(e => e.ClinicalSummary).HasMaxLength(500);
+            entity.Property(e => e.ConfidenceScore)
+                .HasDefaultValueSql("(NULL)")
+                .HasColumnType("decimal(3, 2)");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
             entity.Property(e => e.ModifiedAt).HasDefaultValueSql("(getutcdate())");
             entity.Property(e => e.Specialty)
@@ -108,18 +139,6 @@ public partial class ReferralTriageContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(255);
             entity.Property(e => e.ModifiedDate).HasDefaultValueSql("(getutcdate())");
             entity.Property(e => e.Username).HasMaxLength(100);
-        });
-
-        modelBuilder.Entity<DomainEventLog>(entity =>
-        {
-            entity.HasKey(e => e.DomainEventId).HasName("PK__DomainEv__3214EC07FF9FB24B");
-
-            entity.ToTable("DomainEventLog");
-
-            entity.Property(e => e.DomainEventId).ValueGeneratedNever();
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
-            entity.Property(e => e.EventType).HasMaxLength(255);
-            entity.Property(e => e.Payload).HasColumnType("nvarchar(max)");
         });
 
         OnModelCreatingPartial(modelBuilder);

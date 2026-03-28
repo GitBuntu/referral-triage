@@ -4,6 +4,7 @@ public class ReferralTriageSettings
 {
     public string? BlobStorageAccount { get; set; }
     public string? BlobContainer { get; set; }
+    public string? BlobIncomingPath { get; set; }
     public string? SqlServerDatabase { get; set; }
     public string? TriageRecordsTableName { get; set; }
     public string? DocumentIntelligenceEndpoint { get; set; }
@@ -17,4 +18,6 @@ public class ReferralTriageSettings
     public long MaxFileSizeBytes { get; set; } = 52428800; // 50 MB
     public string? AllowedFileTypes { get; set; }
     public string? MetricsAggregationSchedule { get; set; }
+    public string? DLQName { get; set; }
+    public double ConfidenceThreshold { get; set; } = 0.90;
 }

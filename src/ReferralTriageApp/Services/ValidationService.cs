@@ -32,7 +32,7 @@ public class ValidationService : IValidationService
             try
             {
                 var documentBytes = Convert.FromBase64String(request.DocumentData);
-                var maxFileSize = _configuration.GetValue<long>("ReferralTriageSettings:MaxFileSizeBytes", 52428800);
+                var maxFileSize = _configuration.GetValue<long>("ReferralTriageApp:MaxFileSizeBytes", 52428800);
 
                 if (documentBytes.Length == 0)
                 {
@@ -56,7 +56,7 @@ public class ValidationService : IValidationService
         }
         else
         {
-            var allowedFormats = (_configuration["ReferralTriageSettings:AllowedFileTypes"]
+            var allowedFormats = (_configuration["ReferralTriageApp:AllowedFileTypes"]
                 ?? "pdf,txt,png,jpg,jpeg")
                 .Split(',')
                 .Select(f => f.Trim().ToLowerInvariant())
@@ -88,7 +88,7 @@ public class ValidationService : IValidationService
         }
         else
         {
-            var allowedSpecialties = (_configuration["ReferralTriageSettings:AllowedSpecialties"]
+            var allowedSpecialties = (_configuration["ReferralTriageApp:AllowedSpecialties"]
                 ?? "cardiology,orthopaedics,neurology,dermatology,general_medicine")
                 .Split(',')
                 .Select(s => s.Trim().ToLowerInvariant())
@@ -107,7 +107,7 @@ public class ValidationService : IValidationService
         }
         else
         {
-            var allowedUrgencies = (_configuration["ReferralTriageSettings:AllowedUrgencies"]
+            var allowedUrgencies = (_configuration["ReferralTriageApp:AllowedUrgencies"]
                 ?? "routine,soon,urgent")
                 .Split(',')
                 .Select(u => u.Trim().ToLowerInvariant())

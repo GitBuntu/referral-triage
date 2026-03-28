@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Azure.Storage.Blobs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -10,11 +11,17 @@ namespace ReferralTriageApp.Services;
 
 public class TriageProcessingService : ITriageProcessingService
 {
+    // Quality gate constants
+    private const string DEFAULT_CONFIDENCE_THRESHOLD_KEY = "ReferralTriageApp:ConfidenceThreshold";
+    private const double DEFAULT_CONFIDENCE_THRESHOLD = 0.90;
+    private const int MAX_RETRIES = 2;
+
     private readonly BlobServiceClient _blobServiceClient;
     private readonly ReferralTriageContext _dbContext;
     private readonly IDocumentExtractionService _documentExtractionService;
     private readonly ITriageClassificationService _triageClassificationService;
     private readonly IValidationService _validationService;
+    private readonly IDeadLetterService _deadLetterService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<TriageProcessingService> _logger;
 
@@ -24,6 +31,7 @@ public class TriageProcessingService : ITriageProcessingService
         IDocumentExtractionService documentExtractionService,
         ITriageClassificationService triageClassificationService,
         IValidationService validationService,
+        IDeadLetterService deadLetterService,
         IConfiguration configuration,
         ILogger<TriageProcessingService> logger)
     {
@@ -32,27 +40,42 @@ public class TriageProcessingService : ITriageProcessingService
         _documentExtractionService = documentExtractionService;
         _triageClassificationService = triageClassificationService;
         _validationService = validationService;
+        _deadLetterService = deadLetterService;
         _configuration = configuration;
         _logger = logger;
     }
 
     public async Task ProcessTriageAsync(string referralId, string documentFormat, string blobPath)
     {
+        var stopwatch = Stopwatch.StartNew();
         try
         {
-            _logger.LogInformation("Starting triage processing for referral: {ReferralId}", referralId);
+            _logger.LogInformation("TRIAGE_PIPELINE_START: ReferralId={ReferralId}, DocumentFormat={DocumentFormat}, BlobPath={BlobPath}",
+                referralId, documentFormat, blobPath);
 
-            // Extract text from document (OCR if needed)
-            var extractedText = await _documentExtractionService.ExtractTextFromDocumentAsync(blobPath, documentFormat);
+            // Extract text from document (with retry logic)
+            var extractedText = await RetryHelper.RetryAsync(
+                async () => await _documentExtractionService.ExtractTextFromDocumentAsync(blobPath, documentFormat),
+                maxRetries: MAX_RETRIES,
+                logger: _logger,
+                operationName: "document_extraction");
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                _logger.LogError("Failed to extract text from document: {ReferralId}", referralId);
+                _logger.LogWarning("TRIAGE_EXTRACTION_FAILED: ReferralId={ReferralId}, ExtractedText is empty/null after {MaxRetries} retries",
+                    referralId, MAX_RETRIES);
+                await _deadLetterService.EmitToDeadLetterAsync(
+                    referralId,
+                    "document_extraction_failed",
+                    "Extracted text is empty or whitespace",
+                    retryCount: MAX_RETRIES);
                 await UpdateReferralStatusAsync(referralId, "failed");
                 return;
             }
 
-            // Classify with AI model
+            _logger.LogInformation("Extraction succeeded for ReferralId={ReferralId}, TextLength={TextLength}", referralId, extractedText.Length);
+
+            // Classify with AI model (with retry logic)
             var triageRequest = new TriageRequest
             {
                 ReferralId = referralId,
@@ -60,7 +83,27 @@ public class TriageProcessingService : ITriageProcessingService
                 ExtractedText = extractedText
             };
 
-            var triageResponse = await _triageClassificationService.ClassifyReferralAsync(triageRequest);
+            var triageResponse = await RetryHelper.RetryAsync(
+                async () => await _triageClassificationService.ClassifyReferralAsync(triageRequest),
+                maxRetries: MAX_RETRIES,
+                logger: _logger,
+                operationName: "document_classification");
+
+            if (triageResponse == null)
+            {
+                _logger.LogWarning("TRIAGE_CLASSIFICATION_FAILED: ReferralId={ReferralId}, Response is null after {MaxRetries} retries",
+                    referralId, MAX_RETRIES);
+                await _deadLetterService.EmitToDeadLetterAsync(
+                    referralId,
+                    "classification_failed",
+                    "AI classification returned null after max retries",
+                    retryCount: MAX_RETRIES);
+                await UpdateReferralStatusAsync(referralId, "failed");
+                return;
+            }
+
+            _logger.LogInformation("Classification succeeded for ReferralId={ReferralId}, Specialty={Specialty}, Urgency={Urgency}, ConfidenceScore={ConfidenceScore}",
+                referralId, triageResponse.Specialty, triageResponse.Urgency, triageResponse.ConfidenceScore);
 
             // Validate triage record
             var triageRecord = new Models.TriageRecord
@@ -79,8 +122,13 @@ public class TriageProcessingService : ITriageProcessingService
             var (isValid, validationErrors) = _validationService.ValidateTriageRecord(triageRecord);
             if (!isValid)
             {
-                _logger.LogError("Triage record validation failed for {ReferralId}: {Errors}",
-                    referralId, string.Join(", ", validationErrors));
+                _logger.LogWarning("TRIAGE_VALIDATION_FAILED: ReferralId={ReferralId}, Errors={Errors}",
+                    referralId, string.Join("; ", validationErrors));
+                await _deadLetterService.EmitToDeadLetterAsync(
+                    referralId,
+                    "validation_failed",
+                    $"Validation errors: {string.Join("; ", validationErrors)}",
+                    retryCount: 0);
                 await UpdateReferralStatusAsync(referralId, "failed");
                 return;
             }
@@ -88,17 +136,95 @@ public class TriageProcessingService : ITriageProcessingService
             // Store triage record in SQL DB
             await StoreTriageRecordAsync(triageRecord);
 
-            // Update referral status
-            await UpdateReferralStatusAsync(referralId, "completed");
+            // Apply quality gates to determine final status
+            var confidenceThreshold = _configuration.GetValue<double>(DEFAULT_CONFIDENCE_THRESHOLD_KEY, DEFAULT_CONFIDENCE_THRESHOLD);
+            var finalStatus = ApplyQualityGates(triageResponse, confidenceThreshold, referralId);
 
-            _logger.LogInformation("Triage processing completed successfully for referral: {ReferralId}", referralId);
+            // Update referral status based on quality gates
+            await UpdateReferralStatusAsync(referralId, finalStatus);
+
+            stopwatch.Stop();
+            _logger.LogInformation("TRIAGE_PIPELINE_COMPLETE: ReferralId={ReferralId}, FinalStatus={Status}, Duration={DurationMs}ms, ConfidenceScore={ConfidenceScore}",
+                referralId, finalStatus, stopwatch.ElapsedMilliseconds, triageResponse.ConfidenceScore);
+        }
+        catch (TriageClassificationException ex)
+        {
+            stopwatch.Stop();
+            _logger.LogError(ex, "TRIAGE_CLASSIFICATION_EXCEPTION: ReferralId={ReferralId}, Duration={DurationMs}ms, Message={Message}",
+                referralId, stopwatch.ElapsedMilliseconds, ex.Message);
+            await _deadLetterService.EmitToDeadLetterAsync(
+                referralId,
+                "classification_exception",
+                ex.Message,
+                retryCount: MAX_RETRIES);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during triage processing for referral: {ReferralId}", referralId);
-            await UpdateReferralStatusAsync(referralId, "failed");
-            throw;
+            stopwatch.Stop();
+            _logger.LogError(ex, "TRIAGE_PIPELINE_ERROR: ReferralId={ReferralId}, Duration={DurationMs}ms, Exception={ExceptionType}",
+                referralId, stopwatch.ElapsedMilliseconds, ex.GetType().Name);
+            await _deadLetterService.EmitToDeadLetterAsync(
+                referralId,
+                "processing_exception",
+                ex.Message,
+                retryCount: 0);
         }
+    }
+
+    /// <summary>
+    /// Applies quality gates to determine whether a referral can be auto-completed or requires manual review.
+    /// Quality gate criteria:
+    /// 1. Confidence score >= configured threshold (default 0.90)
+    /// 2. All required extracted fields are populated (non-empty)
+    /// </summary>
+    private string ApplyQualityGates(TriageResponse triageResponse, double confidenceThreshold, string referralId)
+    {
+        // Check confidence score threshold
+        if (triageResponse.ConfidenceScore < confidenceThreshold)
+        {
+            _logger.LogInformation(
+                "Referral {ReferralId} failed confidence gate: score={Score} < threshold={Threshold}",
+                referralId, triageResponse.ConfidenceScore, confidenceThreshold);
+            return "pending_review";
+        }
+
+        // Check required fields are populated
+        if (!AllRequiredFieldsPopulated(triageResponse.ExtractedFields))
+        {
+            _logger.LogInformation(
+                "Referral {ReferralId} failed required fields gate: missing or empty required field",
+                referralId);
+            return "pending_review";
+        }
+
+        _logger.LogInformation(
+            "Referral {ReferralId} passed all quality gates: score={Score}, all required fields populated",
+            referralId, triageResponse.ConfidenceScore);
+        return "completed";
+    }
+
+    /// <summary>
+    /// Validates that all required extracted fields are present and non-empty.
+    /// Required fields: patient_name, dob, symptoms, duration, red_flags
+    /// </summary>
+    private bool AllRequiredFieldsPopulated(Dictionary<string, string>? extractedFields)
+    {
+        if (extractedFields == null || extractedFields.Count == 0)
+        {
+            return false;
+        }
+
+        var requiredFields = new[] { "patient_name", "dob", "symptoms", "duration", "red_flags" };
+
+        foreach (var field in requiredFields)
+        {
+            if (!extractedFields.TryGetValue(field, out var value) || string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private async Task StoreTriageRecordAsync(Models.TriageRecord triageRecord)
@@ -119,6 +245,7 @@ public class TriageProcessingService : ITriageProcessingService
                 existingRecord.Urgency = triageRecord.Urgency;
                 existingRecord.ExtractedFields = serializedFields;
                 existingRecord.ClinicalSummary = triageRecord.ClinicalSummary;
+                existingRecord.ConfidenceScore = triageRecord.ConfidenceScore.HasValue ? (decimal?)triageRecord.ConfidenceScore : null;
                 existingRecord.TriagedAt = triageRecord.TriagedAt;
                 existingRecord.ModifiedAt = DateTime.UtcNow;
 
@@ -138,6 +265,7 @@ public class TriageProcessingService : ITriageProcessingService
                     Urgency = triageRecord.Urgency,
                     ExtractedFields = serializedFields,
                     ClinicalSummary = triageRecord.ClinicalSummary,
+                    ConfidenceScore = triageRecord.ConfidenceScore.HasValue ? (decimal?)triageRecord.ConfidenceScore : null,
                     CreatedAt = DateTime.UtcNow,
                     TriagedAt = triageRecord.TriagedAt,
                     ModifiedAt = DateTime.UtcNow

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.AI.OpenAI;
@@ -12,6 +13,37 @@ namespace ReferralTriageApp.Services;
 
 public class TriageClassificationService : ITriageClassificationService
 {
+    // Configuration and API constants
+    private const string DEFAULT_DEPLOYMENT_NAME = "gpt-4";
+    private const string FUNCTION_CALL_FINISH_REASON = "tool_calls";
+    private const string FUNCTION_NAME = "triage_referral";
+
+    // API request parameters
+    private const float TEMPERATURE = 0.7f;
+    private const int MAX_TOKENS = 1000;
+
+    // Confidence score constraints
+    private const double DEFAULT_CONFIDENCE_SCORE = 0.5;
+    private const double MOCK_CONFIDENCE_SCORE = 0.65;
+    private const double CONFIDENCE_MINIMUM = 0;
+    private const double CONFIDENCE_MAXIMUM = 1;
+
+    // Text length constraints
+    private const int CLINICAL_SUMMARY_MAX_LENGTH = 500;
+    private const int USER_PROMPT_MAX_LENGTH = 3000;
+    private const int MOCK_SYMPTOMS_TRUNCATE_LENGTH = 100;
+
+    // Default values
+    private const string DEFAULT_SPECIALTY = "general_medicine";
+    private const string DEFAULT_URGENCY = "routine";
+    private const string MOCK_PATIENT_NAME = "Not extracted";
+    private const string MOCK_DOB = "Not extracted";
+    private const string MOCK_DURATION = "Unknown";
+    private const string MOCK_RED_FLAGS = "None noted";
+    private const string MOCK_CLINICAL_SUMMARY = "Patient requires evaluation. Document review indicated need for specialist assessment.";
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
     private readonly IConfiguration _configuration;
     private readonly ILogger<TriageClassificationService> _logger;
 
@@ -25,45 +57,99 @@ public class TriageClassificationService : ITriageClassificationService
 
     public async Task<TriageResponse> ClassifyReferralAsync(TriageRequest request)
     {
+        var stopwatch = Stopwatch.StartNew();
         try
         {
-            _logger.LogInformation("Starting AI classification for referral: {ReferralId}", request.ReferralId);
+            _logger.LogInformation("Starting AI classification for referral: {ReferralId}, TextLength: {TextLength}",
+                request.ReferralId, request.ExtractedText?.Length ?? 0);
 
-            var endpoint = _configuration["ReferralTriageSettings:AzureOpenAiEndpoint"];
-            var key = _configuration["ReferralTriageSettings:AzureOpenAiKey"];
-            var deploymentName = _configuration["ReferralTriageSettings:AzureOpenAiDeploymentName"] ?? "gpt-4";
-
-            _logger.LogInformation("Endpoint loaded: {EndpointLoaded}, Key loaded: {KeyLoaded}, Deployment: {DeploymentName}",
-                !string.IsNullOrEmpty(endpoint),
-                !string.IsNullOrEmpty(key),
-                deploymentName);
+            var endpoint = _configuration["ReferralTriageApp:AzureOpenAiEndpoint"];
+            var key = _configuration["ReferralTriageApp:AzureOpenAiKey"];
+            var deploymentName = _configuration["ReferralTriageApp:AzureOpenAiDeploymentName"] ?? DEFAULT_DEPLOYMENT_NAME;
 
             if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(key))
             {
-                _logger.LogWarning("Azure OpenAI credentials not found, returning mock classification");
+                _logger.LogWarning("CLASSIFICATION_MOCK_FALLBACK: ReferralId={ReferralId}, Azure OpenAI credentials not found, using mock classification",
+                    request.ReferralId);
                 return GetMockClassification(request.ExtractedText);
             }
+
+            _logger.LogInformation("Azure OpenAI endpoint available for ReferralId={ReferralId}, Deployment={DeploymentName}",
+                request.ReferralId, deploymentName);
 
             var client = new OpenAIClient(new Uri(endpoint), new AzureKeyCredential(key));
 
             var systemPrompt = BuildSystemPrompt();
             var userPrompt = BuildUserPrompt(request.ExtractedText);
 
+            var triageFunction = new ChatCompletionsFunctionToolDefinition()
+            {
+                Name = FUNCTION_NAME,
+                Description = "Classify a medical referral and extract key clinical information",
+                Parameters = BinaryData.FromObjectAsJson(new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        specialty = new
+                        {
+                            type = "string",
+                            description = "Medical specialty",
+                            @enum = new[] { "cardiology", "orthopaedics", "neurology", "dermatology", "general_medicine" }
+                        },
+                        urgency = new
+                        {
+                            type = "string",
+                            description = "Urgency level",
+                            @enum = new[] { "routine", "soon", "urgent" }
+                        },
+                        extracted_fields = new
+                        {
+                            type = "object",
+                            description = "Extracted clinical information",
+                            properties = new
+                            {
+                                patient_name = new { type = "string", description = "Patient full name" },
+                                dob = new { type = "string", description = "Date of birth (YYYY-MM-DD format)" },
+                                symptoms = new { type = "string", description = "Primary symptoms" },
+                                duration = new { type = "string", description = "Symptom duration" },
+                                red_flags = new { type = "string", description = "Critical red flags or complications" }
+                            },
+                            required = new[] { "patient_name", "dob", "symptoms", "duration", "red_flags" }
+                        },
+                        clinical_summary = new
+                        {
+                            type = "string",
+                            description = "Brief clinical summary (max 500 characters)",
+                            maxLength = CLINICAL_SUMMARY_MAX_LENGTH
+                        },
+                        confidence_score = new
+                        {
+                            type = "number",
+                            description = "Confidence score (0-1) in the classification",
+                            minimum = CONFIDENCE_MINIMUM,
+                            maximum = CONFIDENCE_MAXIMUM
+                        }
+                    },
+                    required = new[] { "specialty", "urgency", "extracted_fields", "clinical_summary" }
+                })
+            };
+
             var chatCompletionsOptions = new ChatCompletionsOptions()
             {
                 DeploymentName = deploymentName,
-                Temperature = 0.7f,
-                MaxTokens = 1000,
+                Temperature = TEMPERATURE,
+                MaxTokens = MAX_TOKENS,
                 Messages =
                 {
                     new ChatRequestSystemMessage(systemPrompt),
                     new ChatRequestUserMessage(userPrompt)
-                }
+                },
+                Tools = { triageFunction }
             };
 
             var response = await client.GetChatCompletionsAsync(chatCompletionsOptions);
 
-            // Log token usage explicitly
             _logger.LogInformation(
                 "GPT-4 Token Usage for Referral {ReferralId} - Prompt Tokens: {PromptTokens}, Completion Tokens: {CompletionTokens}, Total Tokens: {TotalTokens}",
                 request.ReferralId,
@@ -71,60 +157,99 @@ public class TriageClassificationService : ITriageClassificationService
                 response.Value.Usage?.CompletionTokens ?? 0,
                 response.Value.Usage?.TotalTokens ?? 0);
 
+            // Check if we got a function call
+            if (response.Value.Choices[0].FinishReason?.ToString() == FUNCTION_CALL_FINISH_REASON)
+            {
+                var toolCall = response.Value.Choices[0].Message.ToolCalls[0];
+
+                if (toolCall is ChatCompletionsFunctionToolCall functionToolCall)
+                {
+                    _logger.LogInformation("Function call received for referral: {ReferralId}", request.ReferralId);
+
+                    try
+                    {
+                        var triageResponse = ParseFunctionCallResponse(functionToolCall.Arguments);
+                        _logger.LogInformation("Successfully parsed function call for referral: {ReferralId}", request.ReferralId);
+                        return triageResponse;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error parsing function call arguments for referral: {ReferralId}", request.ReferralId);
+                        throw new TriageClassificationException($"Function call response parsing failed for referral {request.ReferralId}", ex);
+                    }
+                }
+            }
+
+            // Fallback: try to parse as regular text response (safety net)
             var responseText = response.Value.Choices[0].Message.Content;
-            _logger.LogInformation("AI response received for referral: {ReferralId}", request.ReferralId);
+            if (!string.IsNullOrEmpty(responseText))
+            {
+                _logger.LogInformation("No function call received, attempting fallback JSON parsing for referral: {ReferralId}", request.ReferralId);
+                return ParseAIResponse(responseText);
+            }
 
-            // Parse response
-            var triageResponse = ParseAIResponse(responseText);
-
-            return triageResponse;
+            throw new TriageClassificationException($"No valid response received from OpenAI for referral {request.ReferralId}");
+        }
+        catch (TriageClassificationException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during AI classification for referral: {ReferralId}. Exception Message: {ExceptionMessage}", request.ReferralId, ex.Message);
-            // Return default/mock classification on error
-            return GetMockClassification(request.ExtractedText);
+            throw new TriageClassificationException($"AI classification failed for referral {request.ReferralId}", ex);
         }
     }
 
-    private string BuildSystemPrompt()
+    private TriageResponse ParseFunctionCallResponse(string functionArguments)
+    {
+        var parsed = JsonSerializer.Deserialize<TriageResponseJson>(functionArguments, JsonOptions);
+
+        if (parsed == null)
+        {
+            throw new InvalidOperationException("Function arguments deserialization returned null");
+        }
+
+        var extractedFields = parsed.ExtractedFields ?? [];
+
+        // Validate all required fields are present and non-empty
+        var requiredFields = new[] { "patient_name", "dob", "symptoms", "duration", "red_flags" };
+        foreach (var field in requiredFields)
+        {
+            if (!extractedFields.TryGetValue(field, out var fieldValue) || string.IsNullOrWhiteSpace(fieldValue))
+            {
+                throw new InvalidOperationException($"Required extracted field '{field}' is missing or empty");
+            }
+        }
+
+        return new TriageResponse
+        {
+            Specialty = ValidateSpecialty(parsed.Specialty),
+            Urgency = ValidateUrgency(parsed.Urgency),
+            ExtractedFields = extractedFields,
+            ClinicalSummary = TruncateSummary(parsed.ClinicalSummary ?? ""),
+            ConfidenceScore = parsed.ConfidenceScore > 0 ? parsed.ConfidenceScore : DEFAULT_CONFIDENCE_SCORE
+        };
+    }
+
+    private static string BuildSystemPrompt()
     {
         return @"You are a medical triage specialist AI assistant. Your task is to analyze referral documents and classify them for appropriate care routing.
 
-For each referral, you must:
-1. Extract key clinical information (patient name, DOB, symptoms, symptom duration, red flags)
-2. Classify the specialty as ONE of: cardiology, orthopaedics, neurology, dermatology, general_medicine
-3. Assign urgency level as ONE of: routine, soon, urgent
-4. Provide a brief clinical summary (under 500 characters)
+For each referral, extract key clinical information and classify appropriately:
+- Extract patient demographic and clinical details (name, DOB, symptoms, symptom duration, critical red flags)
+- Classify the appropriate medical specialty
+- Assign urgency level based on clinical indicators
+- Provide a concise clinical summary
 
-CRITICAL RULES:
-- Specialty MUST be exactly one of: cardiology, orthopaedics, neurology, dermatology, general_medicine
-- Urgency MUST be exactly one of: routine, soon, urgent
-- Extract fields MUST include: patient_name, dob, symptoms, duration, red_flags
-- All extracted fields MUST have non-empty string values
-- Clinical summary MUST NOT exceed 500 characters
-
-Respond with a JSON object containing:
-{
-  ""specialty"": ""string"",
-  ""urgency"": ""string"",
-  ""extractedFields"": {
-    ""patient_name"": ""string"",
-    ""dob"": ""string"",
-    ""symptoms"": ""string"",
-    ""duration"": ""string"",
-    ""red_flags"": ""string""
-  },
-  ""clinicalSummary"": ""string"",
-  ""confidenceScore"": 0.85
-}";
+Focus on accuracy in specialty classification and urgency assessment. The structured format ensures consistency in downstream processing.";
     }
 
-    private string BuildUserPrompt(string referralText)
+    private static string BuildUserPrompt(string referralText)
     {
-        var maxLength = 3000;
+        const int maxLength = USER_PROMPT_MAX_LENGTH;
         var truncatedText = referralText.Length > maxLength
-            ? referralText.Substring(0, maxLength) + "\n[... truncated due to length ...]"
+            ? string.Concat(referralText.AsSpan(0, maxLength), "\n[... truncated due to length ...]")
             : referralText;
 
         return $@"Please analyze the following referral document and provide triage classification:
@@ -147,9 +272,7 @@ Provide your response as a valid JSON object only, with no additional text.";
             if (jsonStart >= 0 && jsonEnd > jsonStart)
             {
                 var jsonStr = responseText.Substring(jsonStart, jsonEnd - jsonStart + 1);
-                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-
-                var parsed = JsonSerializer.Deserialize<TriageResponseJson>(jsonStr, options);
+                var parsed = JsonSerializer.Deserialize<TriageResponseJson>(jsonStr, JsonOptions);
 
                 if (parsed != null)
                 {
@@ -157,7 +280,7 @@ Provide your response as a valid JSON object only, with no additional text.";
                     {
                         Specialty = ValidateSpecialty(parsed.Specialty),
                         Urgency = ValidateUrgency(parsed.Urgency),
-                        ExtractedFields = parsed.ExtractedFields ?? new(),
+                        ExtractedFields = parsed.ExtractedFields ?? [],
                         ClinicalSummary = TruncateSummary(parsed.ClinicalSummary ?? ""),
                         ConfidenceScore = parsed.ConfidenceScore
                     };
@@ -175,7 +298,7 @@ Provide your response as a valid JSON object only, with no additional text.";
 
     private string ValidateSpecialty(string? specialty)
     {
-        var allowedSpecialties = _configuration["ReferralTriageSettings:AllowedSpecialties"]
+        var allowedSpecialties = _configuration["ReferralTriageApp:AllowedSpecialties"]
             ?? "cardiology,orthopaedics,neurology,dermatology,general_medicine";
         var specialtyList = allowedSpecialties.Split(',');
 
@@ -184,12 +307,12 @@ Provide your response as a valid JSON object only, with no additional text.";
             return specialty.ToLowerInvariant();
         }
 
-        return "general_medicine"; // Default fallback
+        return DEFAULT_SPECIALTY;
     }
 
     private string ValidateUrgency(string? urgency)
     {
-        var allowedUrgencies = _configuration["ReferralTriageSettings:AllowedUrgencies"]
+        var allowedUrgencies = _configuration["ReferralTriageApp:AllowedUrgencies"]
             ?? "routine,soon,urgent";
         var urgencyList = allowedUrgencies.Split(',');
 
@@ -198,15 +321,17 @@ Provide your response as a valid JSON object only, with no additional text.";
             return urgency.ToLowerInvariant();
         }
 
-        return "routine"; // Default fallback
+        return DEFAULT_URGENCY;
     }
 
-    private string TruncateSummary(string summary)
+    private static string TruncateSummary(string summary)
     {
-        return summary.Length > 500 ? summary.Substring(0, 500) : summary;
+        return summary.Length > CLINICAL_SUMMARY_MAX_LENGTH
+            ? new string(summary.AsSpan(0, CLINICAL_SUMMARY_MAX_LENGTH))
+            : summary;
     }
 
-    private TriageResponse GetMockClassification(string referralText)
+    private static TriageResponse GetMockClassification(string referralText)
     {
         // Simple heuristic-based classification for testing
         var hasCardiacKeywords = referralText.Contains("heart", StringComparison.OrdinalIgnoreCase) ||
@@ -238,14 +363,14 @@ Provide your response as a valid JSON object only, with no additional text.";
             Urgency = urgency,
             ExtractedFields = new Dictionary<string, string>
             {
-                { "patient_name", "Not extracted" },
-                { "dob", "Not extracted" },
-                { "symptoms", referralText.Length > 100 ? referralText.Substring(0, 100) : referralText },
-                { "duration", "Unknown" },
-                { "red_flags", "None noted" }
+                { "patient_name", MOCK_PATIENT_NAME },
+                { "dob", MOCK_DOB },
+                { "symptoms", referralText.Length > MOCK_SYMPTOMS_TRUNCATE_LENGTH ? new string(referralText.AsSpan(0, MOCK_SYMPTOMS_TRUNCATE_LENGTH)) : referralText },
+                { "duration", MOCK_DURATION },
+                { "red_flags", MOCK_RED_FLAGS }
             },
-            ClinicalSummary = "Patient requires evaluation. Document review indicated need for specialist assessment.",
-            ConfidenceScore = 0.65
+            ClinicalSummary = MOCK_CLINICAL_SUMMARY,
+            ConfidenceScore = MOCK_CONFIDENCE_SCORE
         };
     }
 
@@ -257,13 +382,13 @@ Provide your response as a valid JSON object only, with no additional text.";
         [JsonPropertyName("urgency")]
         public string? Urgency { get; set; }
 
-        [JsonPropertyName("extractedFields")]
+        [JsonPropertyName("extracted_fields")]
         public Dictionary<string, string>? ExtractedFields { get; set; }
 
-        [JsonPropertyName("clinicalSummary")]
+        [JsonPropertyName("clinical_summary")]
         public string? ClinicalSummary { get; set; }
 
-        [JsonPropertyName("confidenceScore")]
+        [JsonPropertyName("confidence_score")]
         public double ConfidenceScore { get; set; }
     }
 }

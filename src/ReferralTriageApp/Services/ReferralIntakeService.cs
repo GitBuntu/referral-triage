@@ -39,20 +39,24 @@ public class ReferralIntakeService : IReferralIntakeService
             var (isValid, errors) = _validationService.ValidateReferralIntakeRequest(request);
             if (!isValid)
             {
-                _logger.LogWarning("Referral intake validation failed: {Errors}", string.Join(", ", errors));
+                _logger.LogWarning("INTAKE_VALIDATION_FAILED: {Errors}", string.Join("; ", errors));
                 throw new ArgumentException($"Validation failed: {string.Join(", ", errors)}");
             }
 
             // Generate unique ReferralId
             var referralId = Guid.NewGuid().ToString();
-            _logger.LogInformation("Processing referral intake with ID: {ReferralId}", referralId);
+            var patientMrnHash = request.PatientMRN is null
+                ? null
+                : Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(request.PatientMRN)));
+            _logger.LogInformation("INTAKE_PIPELINE_START: ReferralId={ReferralId}, DocumentFormat={DocumentFormat}, PatientMRNHash={PatientMRNHash}",
+                referralId, request.DocumentFormat, patientMrnHash);
 
             // Calculate document hash
             var documentBytes = Convert.FromBase64String(request.DocumentData);
             var documentHash = CalculateSHA256Hash(documentBytes);
 
             // Upload to Blob Storage
-            var blobIncomingPath = _configuration["ReferralTriageSettings:BlobIncomingPath"] ?? "incoming";
+            var blobIncomingPath = _configuration["ReferralTriageApp:BlobIncomingPath"] ?? "incoming";
             var blobPath = $"{blobIncomingPath}/{referralId}/{referralId}.{GetFileExtension(request.DocumentFormat)}";
             var blobUri = await UploadDocumentToBlobAsync(documentBytes, blobPath);
 
@@ -70,6 +74,9 @@ public class ReferralIntakeService : IReferralIntakeService
 
             await StoreReferralMetadataAsync(referralDocument, documentBytes.Length);
 
+            _logger.LogInformation("INTAKE_PIPELINE_COMPLETE: ReferralId={ReferralId}, DocumentSize={DocumentSize}bytes, BlobPath={BlobPath}, Hash={DocumentHash}",
+                referralId, documentBytes.Length, blobPath, documentHash);
+
             return new ReferralIntakeResponse
             {
                 ReferralId = referralId,
@@ -82,12 +89,12 @@ public class ReferralIntakeService : IReferralIntakeService
         }
         catch (ArgumentException ex)
         {
-            _logger.LogError(ex, "Validation error in referral intake");
+            _logger.LogError(ex, "INTAKE_VALIDATION_ERROR: Validation error in referral intake");
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing referral intake");
+            _logger.LogError(ex, "INTAKE_PIPELINE_ERROR: Error processing referral intake");
             throw;
         }
     }
@@ -96,7 +103,7 @@ public class ReferralIntakeService : IReferralIntakeService
     {
         try
         {
-            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageApp:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
 
             // Ensure container exists

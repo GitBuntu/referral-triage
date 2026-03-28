@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Azure.Identity;
 using Azure.Storage.Blobs;
+using Azure.Storage.Queues;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using ReferralTriageApp.Services;
 using ReferralTriageApp.Infrastructure;
@@ -31,6 +32,11 @@ var host = new HostBuilder()
             ?? "UseDevelopmentStorage=true";
         services.AddSingleton(new BlobServiceClient(blobConnectionString));
 
+        // Register Azure Storage Queue client for dead-letter queue
+        var queueConnectionString = config.GetConnectionString("BlobStorage")
+            ?? "UseDevelopmentStorage=true";
+        services.AddSingleton(new QueueServiceClient(queueConnectionString));
+
         // Register Entity Framework Core DbContext
         var sqlConnectionString = config.GetConnectionString("SqlServer")
             ?? "Server=localhost;Database=ReferralTriage;Integrated Security=true;TrustServerCertificate=true;";
@@ -44,9 +50,10 @@ var host = new HostBuilder()
         services.AddScoped<IDocumentExtractionService, DocumentExtractionService>();
         services.AddScoped<ITriageClassificationService, TriageClassificationService>();
         services.AddScoped<IValidationService, ValidationService>();
+        services.AddScoped<IDeadLetterService, DeadLetterService>();
 
         // Register configuration options
-        services.Configure<ReferralTriageSettings>(config.GetSection("ReferralTriageSettings"));
+        services.Configure<ReferralTriageSettings>(config.GetSection("ReferralTriageApp"));
 
         // Add logging
         services.AddLogging();

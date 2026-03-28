@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using Azure.AI.DocumentIntelligence;
@@ -29,9 +30,10 @@ public class DocumentExtractionService : IDocumentExtractionService
 
     public async Task<string> ExtractTextFromDocumentAsync(string blobPath, string documentFormat)
     {
+        var stopwatch = Stopwatch.StartNew();
         try
         {
-            _logger.LogInformation("Starting text extraction for document: {BlobPath}", blobPath);
+            _logger.LogInformation("Starting text extraction for document: {BlobPath}, Format: {DocumentFormat}", blobPath, documentFormat);
 
             // For text files, just download and return
             if (documentFormat.Equals("txt", StringComparison.OrdinalIgnoreCase) ||
@@ -41,19 +43,19 @@ public class DocumentExtractionService : IDocumentExtractionService
             }
 
             // For PDF and images, use Document Intelligence API
-            var endpoint = _configuration["ReferralTriageSettings:DocumentIntelligenceEndpoint"];
-            var key = _configuration["ReferralTriageSettings:DocumentIntelligenceKey"];
+            var endpoint = _configuration["ReferralTriageApp:DocumentIntelligenceEndpoint"];
+            var key = _configuration["ReferralTriageApp:DocumentIntelligenceKey"];
 
             if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(key))
             {
-                _logger.LogWarning("Document Intelligence credentials not found, falling back to text extraction");
+                _logger.LogWarning("Document Intelligence credentials not found. Falling back to basic text extraction for: {BlobPath}", blobPath);
                 return await ExtractTextFromBlobAsync(blobPath);
             }
 
             var client = new DocumentIntelligenceClient(new Uri(endpoint), new AzureKeyCredential(key));
 
             // Get blob client and generate SAS URI (for private containers)
-            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageApp:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             var blobClient = containerClient.GetBlobClient(blobPath);
 
@@ -81,13 +83,20 @@ public class DocumentExtractionService : IDocumentExtractionService
             }
 
             var extractedText = sb.ToString();
-            _logger.LogInformation("Text extraction completed successfully. Extracted length: {Length}", extractedText.Length);
+            stopwatch.Stop();
+
+            _logger.LogInformation("Document Intelligence extraction completed successfully for {BlobPath}. Extracted length: {Length} chars, Duration: {ElapsedMs}ms, Pages: {PageCount}",
+                blobPath,
+                extractedText.Length,
+                stopwatch.ElapsedMilliseconds,
+                operation.Value.Pages?.Count ?? 0);
 
             return extractedText;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error extracting text from document: {BlobPath}", blobPath);
+            stopwatch.Stop();
+            _logger.LogError(ex, "Document Intelligence extraction failed for {BlobPath} after {ElapsedMs}ms", blobPath, stopwatch.ElapsedMilliseconds);
             // Fallback to basic text extraction
             return await ExtractTextFromBlobAsync(blobPath);
         }
@@ -97,7 +106,7 @@ public class DocumentExtractionService : IDocumentExtractionService
     {
         try
         {
-            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageApp:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             var blobClient = containerClient.GetBlobClient(blobPath);
 
@@ -118,7 +127,7 @@ public class DocumentExtractionService : IDocumentExtractionService
     {
         try
         {
-            var containerName = _configuration["ReferralTriageSettings:BlobContainer"] ?? "referrals";
+            var containerName = _configuration["ReferralTriageApp:BlobContainer"] ?? "referrals";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             var blobClient = containerClient.GetBlobClient(blobPath);
 

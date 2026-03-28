@@ -12,6 +12,7 @@ This change hardens the MVP by implementing function calling, retry/DLQ patterns
 ## What Changes
 
 - **Upgrade TriageClassificationService**: Replace JSON parsing with OpenAI function calling (strict schema enforcement for specialty, urgency, extracted fields, confidence score)
+- **Add Quality Gates**: Validate confidence_score and required field population before marking triages complete; route low-confidence or incomplete extractions to review queue
 - **Implement Retry Logic**: Add max 2 retry attempts with exponential backoff for Document Intelligence and OpenAI calls
 - **Add Dead-Letter Queue**: Route failed referrals (after 2 retries) to Azure Storage Queue for manual review
 - **Update TriageProcessorFunction**: Integrate retry logic and DLQ handling; enhance error logging
@@ -27,7 +28,8 @@ This change hardens the MVP by implementing function calling, retry/DLQ patterns
 
 ### Modified Capabilities
 - `triage-classification`: Currently uses basic JSON parsing + validation; upgrade to function calling schema enforcement
-- `triage-processing`: Add retry logic and DLQ handling to TriageProcessorFunction error path
+- `triage-processing`: Add retry logic and DLQ handling to TriageProcessorFunction error path; add quality gates (confidence score + required fields validation)
+- `triage-record-persistence`: Add confidence_score field to TriageRecord for decision logic
 
 ### Already Complete (No Changes)
 - `referral-intake`: HTTP endpoint validates request, uploads document to Blob, stores Referral in SQL (pending status)
@@ -40,8 +42,9 @@ This change hardens the MVP by implementing function calling, retry/DLQ patterns
 
 ## Impact
 
-- **Code Changes**: Refactor TriageClassificationService (function calling), enhance TriageProcessorFunction (retry + DLQ logic), add retry helpers
-- **Configuration**: Add local.settings.json schema documentation; update Program.cs for Storage Queue DLQ connection
-- **Azure Resources**: Add Azure Storage Queue for dead-letter queue
-- **Testing**: Add unit tests (ValidationService ✅, DocumentExtractionService, TriageClassificationService with function calling) and integration tests
-- **Documentation**: Document local.settings.json required keys and values; provide Key Vault secret injection sample
+- **Code Changes**: Refactor TriageClassificationService (function calling), enhance TriageProcessorFunction (retry + DLQ logic), add retry helpers, add quality gate validation in TriageProcessingService
+- **Database**: Add confidence_score column to TriageRecord; update Referral status enum to include 'pending_review'
+- **Configuration**: Add local.settings.json schema documentation; add Triage:ConfidenceThreshold setting; update Program.cs for Storage Queue DLQ connection
+- **Azure Resources**: Add Azure Storage Queue for dead-letter queue; optionally add review queue for low-confidence triages
+- **Testing**: Add unit tests (ValidationService ✅, DocumentExtractionService, TriageClassificationService with function calling) and integration tests; add validation scenario tests
+- **Documentation**: Document local.settings.json required keys and values; provide Key Vault secret injection sample; document confidence threshold rationale
