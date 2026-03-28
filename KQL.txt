@@ -1,0 +1,71 @@
+traces
+| where message contains "ReferralIntake" or message contains "TriageProcessor" or message contains "gpt-4o"
+| extend ReferralId = tostring(customDimensions.ReferralId)
+| order by timestamp asc
+| summarize 
+    Count = count(),
+    FirstTime = min(timestamp),
+    LastTime = max(timestamp),
+    Events = make_list(message)
+    by ReferralId
+
+
+    traces
+| where message contains "OpenAI" or message contains "TriageClassification"
+| extend 
+    ReferralId = tostring(customDimensions.ReferralId),
+    ConfidenceScore = toreal(customDimensions.ConfidenceScore),
+    Specialty = tostring(customDimensions.Specialty),
+    Urgency = tostring(customDimensions.Urgency)
+| project 
+    Timestamp = timestamp,
+    Message = message,
+    ReferralId,
+    Specialty,
+    Urgency,
+    ConfidenceScore,
+    SeverityLevel = severityLevel,
+    OperationId = operation_Id
+| order by Timestamp desc
+
+
+traces
+| where message contains "gpt-4o" or message contains "OpenAI" or message contains "Triage"
+| project 
+    Timestamp = timestamp,
+    Message = message,
+    SeverityLevel = severityLevel,
+    CustomDimensions = customDimensions,
+    OperationId = operation_Id,
+    OperationName = operation_Name
+| order by Timestamp desc
+| limit 100
+
+traces
+| where message contains "Azure OpenAI"
+| extend 
+    ReferralId = extract(@"referralId=([a-f0-9-]+)", 1, message),
+    Deployment = extract(@"Deployment=(\w+)", 1, message)
+| project 
+    Timestamp = timestamp,
+    Message = message,
+    ReferralId,
+    Deployment,
+    SeverityLevel = severityLevel
+| order by Timestamp desc
+
+traces
+| where message contains "TRIAGE_PIPELINE_COMPLETE"
+| extend 
+    FinalStatus = extract(@"FinalStatus=([a-z_]+)", 1, message),
+    ConfidenceScore = todouble(extract(@"ConfidenceScore=([0-9.]+)", 1, message))
+| summarize
+    TotalCount = count(),
+    CompletedCount = countif(FinalStatus == "completed"),
+    FailedCount = countif(FinalStatus == "failed")
+
+
+traces
+| where message contains "text extraction" or message contains "Document Intelligence"
+| project timestamp, message
+| take 20

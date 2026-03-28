@@ -1,0 +1,5 @@
+Patient Name: John Doe
+Date of Birth: 1980-01-15
+Symptoms: chest pain, shortness of breath
+Duration: 2 weeks
+Red Flags: history of hypertension
