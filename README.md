@@ -268,37 +268,42 @@ This is the key mechanism that prevents hallucination. Rather than asking GPT-4o
 
 ```json
 {
-  "name": "classify_referral",
+  "name": "triage_referral",
   "parameters": {
     "type": "object",
     "properties": {
-      "specialty": {
-        "type": "string",
-        "enum": ["cardiology", "orthopaedics", "neurology", "dermatology", "general_medicine"]
-      },
-      "urgency": {
-        "type": "string",
-        "enum": ["routine", "soon", "urgent"]
-      },
-      "patient_name": { "type": "string" },
-      "dob": { "type": "string", "format": "date" },
-      "symptoms": { "type": "string" },
-      "duration": { "type": "string" },
-      "red_flags": { "type": "string" },
-      "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 }
+      "extracted_fields": {
+        "type": "object",
+        "properties": {
+          "specialty": {
+            "type": "string",
+            "enum": ["cardiology", "orthopaedics", "neurology", "dermatology", "general_medicine"]
+          },
+          "urgency": {
+            "type": "string",
+            "enum": ["routine", "soon", "urgent"]
+          },
+          "patient_name": { "type": "string" },
+          "dob": { "type": "string", "format": "date" },
+          "symptoms": { "type": "string" },
+          "duration": { "type": "string" },
+          "red_flags": { "type": "string" },
+          "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
     },
-    "required": ["specialty", "urgency", "confidence_score", "patient_name", "dob", "symptoms", "duration", "red_flags"]
+    "required": ["extracted_fields"]
   }
 }
 ```
 
-**What this does:** GPT-4o must return exactly this structure. It cannot hallucinate. It can only:
+**What this does:** The tool schema defines this structure and these allowed values. GPT-4o will attempt to follow it, which greatly reduces formatting errors and constrains what it can return, but does **not** guarantee that the extracted data or chosen values are factually correct. In practice, the model is constrained to:
 - Pick `specialty` from the enum (cardiology, orthopaedics, neurology, dermatology, or general_medicine)
 - Pick `urgency` from the enum (routine, soon, or urgent)
-- Fill in required string/date fields with extracted values
-- Return a confidence_score between 0 and 1
+- Fill in required string/date fields with values it infers or extracts from the referral text
+- Return a `confidence_score` between 0 and 1
 
-This is **constraint-based inference**—the schema enforces data integrity at the source.
+This is **constraint-based inference**—the schema helps enforce structural data integrity and constrain allowed values, but downstream validation (like the quality gates below) is still required to catch incorrect or low-confidence inferences.
 
 ### 3. Quality Gates After Classification
 
@@ -316,8 +321,12 @@ GPT-4o returns a `confidence_score` (0-1). You reject anything < 0.90. This is w
 **Required Fields Gate:**
 ```csharp
 var requiredFields = new[] { "patient_name", "dob", "symptoms", "duration", "red_flags" };
-if (requiredFields.Any(f => string.IsNullOrEmpty(extractedFields[f]))) {
-    status = "pending_review";  // Reject incomplete extractions
+if (requiredFields.Any(f =>
+{
+    return !extractedFields.TryGetValue(f, out var value) ||
+           string.IsNullOrWhiteSpace(value);
+})) {
+    status = "pending_review";  // Reject incomplete or missing extractions
 }
 ```
 
@@ -328,16 +337,28 @@ If either gate fails, the referral is flagged for manual review rather than auto
 If Azure OpenAI isn't available or fails, your system has a mock classification fallback:
 
 ```csharp
-// Fallback pattern matching when AI is unavailable
-if (text.Contains("chest pain", StringComparison.OrdinalIgnoreCase)) {
-    specialty = "cardiology";
+// Example fallback pattern matching when AI is unavailable (pseudocode)
+// Derive urgency from simple keywords in the referral text
+if (text.Contains("urgent", StringComparison.OrdinalIgnoreCase) ||
+    text.Contains("emergency", StringComparison.OrdinalIgnoreCase) ||
+    text.Contains("severe", StringComparison.OrdinalIgnoreCase))
+{
     urgency = "urgent";
 }
-else if (text.Contains("fracture") || text.Contains("orthopedic")) {
-    specialty = "orthopaedics";
-    urgency = "soon";
+
+// Derive specialty from keyword matches as well
+if (text.Contains("cardiology", StringComparison.OrdinalIgnoreCase) ||
+    text.Contains("heart", StringComparison.OrdinalIgnoreCase))
+{
+    specialty = "cardiology";
 }
-// ... more rules
+else if (text.Contains("orthopaedic", StringComparison.OrdinalIgnoreCase) ||
+         text.Contains("orthopedic", StringComparison.OrdinalIgnoreCase) ||
+         text.Contains("bone", StringComparison.OrdinalIgnoreCase))
+{
+    specialty = "orthopaedics";
+}
+// ... additional keyword rules mirroring TriageClassificationService
 ```
 
 This shows: *Even your fallback is pattern matching, not "understanding."* It's deterministic and predictable.

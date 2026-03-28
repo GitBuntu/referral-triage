@@ -23,7 +23,8 @@ cd /d/source/referral-triage && base64_data=$(base64 -w0 triage-test.jpeg) && pr
 cd /d/source/referral-triage
 
 # Step 2: Generate JSON payload with base64-encoded JPEG
-python3 encode_request.py
+base64_data=$(base64 -w0 triage-test.jpeg)
+printf '{"documentData":"%s","documentFormat":"jpeg"}' "$base64_data" > request.json
 
 # Step 3: Submit to function
 curl -s -X POST http://localhost:7071/api/referrals/intake \

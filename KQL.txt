@@ -1,8 +1,8 @@
 traces
 | where message contains "ReferralIntake" or message contains "TriageProcessor" or message contains "gpt-4o"
 | extend ReferralId = tostring(customDimensions.ReferralId)
-| order by timestamp asc
-| summarize 
+| serialize
+| summarize
     Count = count(),
     FirstTime = min(timestamp),
     LastTime = max(timestamp),
@@ -12,12 +12,12 @@ traces
 
     traces
 | where message contains "OpenAI" or message contains "TriageClassification"
-| extend 
+| extend
     ReferralId = tostring(customDimensions.ReferralId),
     ConfidenceScore = toreal(customDimensions.ConfidenceScore),
     Specialty = tostring(customDimensions.Specialty),
     Urgency = tostring(customDimensions.Urgency)
-| project 
+| project
     Timestamp = timestamp,
     Message = message,
     ReferralId,
@@ -31,7 +31,7 @@ traces
 
 traces
 | where message contains "gpt-4o" or message contains "OpenAI" or message contains "Triage"
-| project 
+| project
     Timestamp = timestamp,
     Message = message,
     SeverityLevel = severityLevel,
@@ -43,10 +43,10 @@ traces
 
 traces
 | where message contains "Azure OpenAI"
-| extend 
-    ReferralId = extract(@"referralId=([a-f0-9-]+)", 1, message),
-    Deployment = extract(@"Deployment=(\w+)", 1, message)
-| project 
+| extend
+    ReferralId = extract(@"ReferralId=([a-fA-F0-9-]+)", 1, message),
+    Deployment = extract(@"Deployment=([\w-]+)", 1, message)
+| project
     Timestamp = timestamp,
     Message = message,
     ReferralId,
@@ -56,7 +56,7 @@ traces
 
 traces
 | where message contains "TRIAGE_PIPELINE_COMPLETE"
-| extend 
+| extend
     FinalStatus = extract(@"FinalStatus=([a-z_]+)", 1, message),
     ConfidenceScore = todouble(extract(@"ConfidenceScore=([0-9.]+)", 1, message))
 | summarize
