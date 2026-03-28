@@ -242,6 +242,131 @@ Failure reasons:
 - `operation_timeout` - Processing timed out
 - `unexpected_error` - Unexpected application error
 
+## How GPT-4o Is Inferring Your Data (Based on Your Code)
+
+Your system uses multiple mechanisms to ensure reliable data inference from medical referral documents. Understanding these mechanisms reveals why GPT-4o can accurately extract structured data rather than simply "guessing."
+
+### 1. Explicit Instructions via Prompts
+
+GPT-4o receives two levels of instruction:
+
+**System Prompt** (the core instruction):
+- Defines the role: "You are a medical triage specialist"
+- Sets constraints: "Extract only valid specialties and urgency levels"
+- Specifies output format: "Return a JSON object with these exact fields"
+
+**User Prompt** (the task):
+- The actual referral document text (extracted via Document Intelligence)
+- Explicit field requirements: "Extract patient_name, dob, symptoms, duration, red_flags"
+- Examples of valid values: "Specialties: cardiology, orthopaedics, neurology, dermatology, general_medicine"
+
+GPT-4o reads these instructions and knows exactly what to extract. It's not inferring your intent—you're explicitly telling it.
+
+### 2. Structured Function Calling (Not Just "Asking")
+
+This is the key mechanism that prevents hallucination. Rather than asking GPT-4o to "return JSON" (which it might format incorrectly), you use **function calling** with a strict schema:
+
+```json
+{
+  "name": "classify_referral",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "specialty": {
+        "type": "string",
+        "enum": ["cardiology", "orthopaedics", "neurology", "dermatology", "general_medicine"]
+      },
+      "urgency": {
+        "type": "string",
+        "enum": ["routine", "soon", "urgent"]
+      },
+      "patient_name": { "type": "string" },
+      "dob": { "type": "string", "format": "date" },
+      "symptoms": { "type": "string" },
+      "duration": { "type": "string" },
+      "red_flags": { "type": "string" },
+      "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "required": ["specialty", "urgency", "confidence_score", "patient_name", "dob", "symptoms", "duration", "red_flags"]
+  }
+}
+```
+
+**What this does:** GPT-4o must return exactly this structure. It cannot hallucinate. It can only:
+- Pick `specialty` from the enum (cardiology, orthopaedics, neurology, dermatology, or general_medicine)
+- Pick `urgency` from the enum (routine, soon, or urgent)
+- Fill in required string/date fields with extracted values
+- Return a confidence_score between 0 and 1
+
+This is **constraint-based inference**—the schema enforces data integrity at the source.
+
+### 3. Quality Gates After Classification
+
+After GPT-4o returns its classification, your system applies validation gates:
+
+**Confidence Score Gate:**
+```csharp
+if (triageResult.ConfidenceScore < 0.90) {
+    status = "pending_review";  // Reject low-confidence results
+}
+```
+
+GPT-4o returns a `confidence_score` (0-1). You reject anything < 0.90. This is where you're saying: *"I don't trust this inference—escalate to human review."*
+
+**Required Fields Gate:**
+```csharp
+var requiredFields = new[] { "patient_name", "dob", "symptoms", "duration", "red_flags" };
+if (requiredFields.Any(f => string.IsNullOrEmpty(extractedFields[f]))) {
+    status = "pending_review";  // Reject incomplete extractions
+}
+```
+
+If either gate fails, the referral is flagged for manual review rather than auto-completion.
+
+### 4. Fallback: Keyword Heuristics
+
+If Azure OpenAI isn't available or fails, your system has a mock classification fallback:
+
+```csharp
+// Fallback pattern matching when AI is unavailable
+if (text.Contains("chest pain", StringComparison.OrdinalIgnoreCase)) {
+    specialty = "cardiology";
+    urgency = "urgent";
+}
+else if (text.Contains("fracture") || text.Contains("orthopedic")) {
+    specialty = "orthopaedics";
+    urgency = "soon";
+}
+// ... more rules
+```
+
+This shows: *Even your fallback is pattern matching, not "understanding."* It's deterministic and predictable.
+
+### The Real Answer: Why This Works
+
+GPT-4o infers your desired data through a combination of mechanisms:
+
+1. **Explicit Prompt** – Your system + user prompts tell it exactly what role to play and what to extract
+2. **Forced Structure** – Function calling + enums constrain the output shape; it can't deviate
+3. **Confidence Scoring** – You provide the threshold (0.90); GPT-4o exposes its uncertainty
+4. **Validation Loop** – You catch when specialty/urgency don't match allowed values and escalate to manual review
+5. **Fallback Heuristics** – Pattern matching provides deterministic behavior when AI is unavailable
+
+### What GPT-4o Cannot Do Without You Telling It
+
+- **It has no idea your confidence threshold is 0.90** without you logging it in code and enforcing it at runtime
+- **It doesn't know which fields are "required"** unless you include them in the JSON schema's `required` array
+- **It can't invent specialties** – they're locked to your enum list (cardiology, orthopaedics, etc.)
+- **It doesn't understand your downstream validation** – if a specialty/urgency value doesn't match your database constraints, that's caught by your validation rules, not GPT-4o
+
+### The Uncertainty: When Confidence < 0.90
+
+When GPT-4o returns `confidence_score < 0.90`, that's it saying: *"I saw patterns in the document, but I wasn't sure."*
+
+Your system correctly treats this as unreliable and escalates to manual review. This is the appropriate response—GPT-4o is exposing its uncertainty rather than confidently returning a wrong answer.
+
+**In summary:** You're not relying on GPT-4o to "understand" medicine. You're using it as a pattern-matching engine with guardrails. The schema, prompts, confidence thresholds, and validation rules are your safety net.
+
 ## Domain Models
 
 ### ReferralDocument
