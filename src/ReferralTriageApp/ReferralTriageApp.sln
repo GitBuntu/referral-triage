@@ -1,0 +1,26 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReferralTriageApp", "ReferralTriageApp.csproj", "{13A12CC2-C2A5-A9B0-6807-70B748C4969F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{13A12CC2-C2A5-A9B0-6807-70B748C4969F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{13A12CC2-C2A5-A9B0-6807-70B748C4969F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{13A12CC2-C2A5-A9B0-6807-70B748C4969F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{13A12CC2-C2A5-A9B0-6807-70B748C4969F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A3FDB271-116D-49B1-A3CE-846181BC57CB}
+	EndGlobalSection
+EndGlobal
