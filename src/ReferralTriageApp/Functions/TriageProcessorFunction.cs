@@ -1,5 +1,7 @@
 using System;
+using System.Text.Json;
 using System.Threading.Tasks;
+using Azure.Messaging.EventGrid;
 using Azure.Storage.Blobs.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
@@ -28,25 +30,74 @@ public class TriageProcessorFunction
     }
 
     [Function("TriageProcessor")]
-    public async Task Run(
-        [BlobTrigger("referrals/incoming/{referralId}/{fileName}")] Stream blobStream,
-        string referralId,
-        string fileName,
-        FunctionContext context)
+    public async Task Run([EventGridTrigger] EventGridEvent gridEvent)
     {
-        // Note: BlobTrigger binding is hard-coded to "referrals/incoming/" path.
-        // If ReferralTriageApp:BlobIncomingPath configuration changes, ensure this trigger path is updated accordingly.
-        // TODO: Consider making trigger path configurable via binding expression if deployment flexibility is needed.
+        // EventGridTrigger is required for Flex Consumption SKU
+        // The EventGrid subscription routes blob creation events to this function
+        // See: https://aka.ms/blob-trigger-eg
 
-        // Resolve the actual blob path using configuration (accessible in error handlers)
+        if (gridEvent.Data is null)
+        {
+            _logger.LogError("EventGrid event contains no data");
+            return;
+        }
+
+        // Parse the EventGrid blob data
+        var eventData = JsonSerializer.Deserialize<JsonElement>(gridEvent.Data.ToString());
+        if (!eventData.TryGetProperty("url", out var urlElement))
+        {
+            _logger.LogError("EventGrid event missing 'url' property");
+            return;
+        }
+
+        var blobUri = urlElement.GetString();
+        if (string.IsNullOrEmpty(blobUri))
+        {
+            _logger.LogError("EventGrid event contains empty blob URI");
+            return;
+        }
+
+        // Extract path from URI: https://storageaccount.blob.core.windows.net/container/path/to/blob
+        var uri = new Uri(blobUri);
+        var pathSegments = uri.AbsolutePath.TrimStart('/').Split('/', 2);
+
+        if (pathSegments.Length < 2)
+        {
+            _logger.LogError("Invalid blob URI format: {BlobUri}", blobUri);
+            return;
+        }
+
+        var containerName = pathSegments[0];
+        var blobPath = pathSegments[1];
+
+        // Validate blob is in referrals/incoming path
         var blobIncomingPath = _configuration["ReferralTriageApp:BlobIncomingPath"] ?? "incoming";
+        var expectedPrefix = $"{blobIncomingPath}/";
+
+        if (!blobPath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Blob path {BlobPath} does not match expected incoming path {ExpectedPrefix}", blobPath, expectedPrefix);
+            return;
+        }
+
+        // Extract referral ID and file name: incoming/referralId/fileName
+        var relativeSegments = blobPath.Substring(expectedPrefix.Length).Split('/', 2);
+        if (relativeSegments.Length < 2)
+        {
+            _logger.LogError("Invalid blob path structure: {BlobPath}", blobPath);
+            await _deadLetterService.EmitToDeadLetterAsync("unknown", "invalid_blob_path", $"Blob path structure invalid: {blobPath}", retryCount: 0);
+            return;
+        }
+
+        var referralId = relativeSegments[0];
+        var fileName = relativeSegments[1];
         var resolvedBlobPath = $"{blobIncomingPath}/{referralId}/{fileName}";
 
         try
         {
             _logger.LogInformation(
-                "TriageProcessor triggered for referral: {ReferralId}, file: {FileName}, blobPath: {ResolvedBlobPath}",
-                referralId, fileName, resolvedBlobPath);
+                "TriageProcessor triggered via EventGrid for referral: {ReferralId}, file: {FileName}, blobUri: {BlobUri}",
+                referralId, fileName, blobUri);
 
             // Validate inputs
             if (string.IsNullOrWhiteSpace(referralId))
@@ -86,8 +137,6 @@ public class TriageProcessorFunction
                     retryCount: 0);
                 return;
             }
-
-
 
             // Process triage (TriageProcessingService handles its own retry/DLQ logic)
             await _triageProcessingService.ProcessTriageAsync(referralId, documentFormat, resolvedBlobPath);

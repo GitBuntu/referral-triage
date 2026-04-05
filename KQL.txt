@@ -69,3 +69,18 @@ traces
 | where message contains "text extraction" or message contains "Document Intelligence"
 | project timestamp, message
 | take 20
+
+
+exceptions
+| where operation_Name =~ "TriageProcessor"
+| project 
+    timestamp,
+    outerMessage,
+    innermostMessage,
+    method,
+    type,
+    stackTrace = tostring(details["stackTrace"]),
+    operation_Id,
+    customDimensions,
+    severityLevel
+| order by timestamp desc
