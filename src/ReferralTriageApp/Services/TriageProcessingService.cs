@@ -133,6 +133,9 @@ public class TriageProcessingService : ITriageProcessingService
                 return;
             }
 
+            // Ensure referral exists before storing triage record (required for FK constraint)
+            await EnsureReferralExistsAsync(referralId, documentFormat, blobPath);
+
             // Store triage record in SQL DB
             await StoreTriageRecordAsync(triageRecord);
 
@@ -280,6 +283,47 @@ public class TriageProcessingService : ITriageProcessingService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error preparing triage record: {ReferralId}", triageRecord.Id);
+            throw;
+        }
+    }
+
+    private async Task EnsureReferralExistsAsync(string referralId, string documentFormat, string blobPath)
+    {
+        try
+        {
+            var referralGuid = Guid.Parse(referralId);
+            var existingReferral = await _dbContext.Referrals.FindAsync(referralGuid);
+
+            if (existingReferral == null)
+            {
+                // Compute document hash from blob path
+                var hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(blobPath));
+                var documentHash = Convert.ToHexString(hashBytes);
+
+                // Create new referral with initial triaging status
+                var newReferral = new Infrastructure.Referral
+                {
+                    ReferralId = referralGuid,
+                    DocumentFormat = documentFormat,
+                    DocumentSize = 1,
+                    DocumentStoragePath = blobPath,
+                    DocumentHash = documentHash,
+                    Status = "triaging",
+                    SubmittedBy = "system",
+                    SubmittedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    ModifiedAt = DateTime.UtcNow
+                };
+
+                _dbContext.Referrals.Add(newReferral);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("Referral created (auto-init from document processing): {ReferralId}", referralId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error ensuring referral exists: {ReferralId}", referralId);
             throw;
         }
     }

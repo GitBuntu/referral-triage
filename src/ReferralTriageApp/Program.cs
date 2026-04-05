@@ -14,8 +14,8 @@ var host = new HostBuilder()
     .ConfigureAppConfiguration((context, configBuilder) =>
     {
         configBuilder
-            .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true)
-            .AddEnvironmentVariables();
+            .AddEnvironmentVariables()
+            .AddJsonFile("local.settings.json", optional: true, reloadOnChange: true);
     })
     .ConfigureServices((context, services) =>
     {

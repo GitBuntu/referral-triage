@@ -15,9 +15,11 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="1.21.0" OutputItemType="Analyzer" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.0.13" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Storage.Blobs" Version="6.2.0" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.EventGrid" Version="3.3.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" Version="4.1.1" />
 
     <!-- Azure SDK -->
+    <PackageReference Include="Azure.Messaging.EventGrid" Version="4.17.0" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.19.0" />
     <PackageReference Include="Azure.Storage.Queues" Version="12.17.0" />
     <PackageReference Include="Azure.Identity" Version="1.10.4" />
