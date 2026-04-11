@@ -6,9 +6,9 @@ Medical referral intake, AI-powered triage processing, and metrics aggregation u
 
 This project implements a serverless pipeline for processing medical referral documents:
 
-1. **ReferralIntake** (HTTP Trigger) - Accepts PDF/text referral documents, validates file type/size, stores in Blob Storage
-2. **TriageProcessor** (Blob Trigger) - Extracts text from documents (OCR), calls AI model for classification, stores triage records in SQL Server
-3. **MetricsAggregator** (Timer Trigger) - Aggregates daily metrics (specialty counts, urgency levels, processing latency)
+1. **ReferralIntake** (HTTP Trigger) - Accepts PDF/text/image referral documents, validates, stores in Blob Storage, records in SQL
+2. **TriageProcessor** (EventGrid Trigger) - Triggered via blob creation event, extracts text (OCR), classifies via GPT-4o, stores TriageRecord in SQL, emits failures to DLQ
+3. **MetricsAggregator** (Timer Trigger) - Daily aggregation of triage metrics by specialty, urgency, and processing latency
 
 ## Architecture
 
@@ -23,7 +23,7 @@ This project implements a serverless pipeline for processing medical referral do
 │  Blob Storage   │
 │  /referrals/    │
 └────────┬────────┘
-         │ Trigger on blob
+         │ EventGrid on blob creation
          ▼
 ┌─────────────────┐      ┌─────────────────┐
 │TriageProcessor  │──────│Document Intel.  │ OCR
@@ -77,24 +77,44 @@ referral-triage/
 │       │   ├── DocumentExtractionService.cs
 │       │   ├── TriageClassificationService.cs
 │       │   ├── MetricsAggregationService.cs
-│       │   └── ValidationService.cs
+       │   ├── ValidationService.cs
+       │   ├── DeadLetterService.cs
+       │   ├── RetryHelper.cs
+       │   └── TriageClassificationException.cs
 │       ├── Infrastructure/
-│       │   ├── ReferralTriageSettings.cs
-│       │   └── DbContext.cs (Entity Framework Core)
+       │   ├── AzureServiceSettings.cs
+       │   ├── ReferralTriageContext.cs (Entity Framework Core)
+       │   ├── Referral.cs
+       │   ├── TriageRecord.cs
+       │   ├── DomainEventLog.cs
+       │   ├── User.cs
+       │   └── SchemaVersion.cs
 │       ├── Program.cs
 │       ├── ReferralTriageApp.csproj
 │       └── local.settings.json
-├── infra/
-│   ├── main.bicep
-│   ├── storage.bicep
-│   ├── sqlserver.bicep
-│   ├── functionapp.bicep
-│   ├── aiservices.bicep
-│   └── keyvault.bicep
-├── azure.yaml
 ├── requirements.md
 └── README.md (this file)
+
 ```
+
+## Azure Resources
+
+| Name | Type |
+|------|------|
+| Application Insights Smart Detection | Action group |
+| ASP-rgreferraltriageprodcanadacentr-8a58 | App Service plan |
+| chris-mmq5p9qj-canadaeast | Foundry |
+| Failure Anomalies - referral-triage-insights | Smart detector alert rule |
+| Failure Anomalies - rtfuncapp | Smart detector alert rule |
+| referral-triage-docint | Document Intelligence |
+| referral-triage-insights | Application Insights |
+| ReferralTriage (sqlsrv-referraltriage-prod-canadacentral-001) | SQL database |
+| rtfuncapp | Function App |
+| rtfuncapp | Application Insights |
+| rtkeyvault | Key vault |
+| rtstoredev | Storage account |
+| rtstoredev-blob-events | Event Grid System Topic |
+| sqlsrv-referraltriage-prod-canadacentral-001 | SQL server |
 
 ## Quick Start
 
@@ -110,16 +130,20 @@ dotnet build
 
 ### 2. Configure Local Settings
 
-Update `src/ReferralTriageApp/local.settings.json` with connection strings for local development:
+Update `src/ReferralTriageApp/local.settings.json` with Azure service credentials:
 
 ```json
 {
-  "ReferralTriageSettings": {
-    "DocumentIntelligenceEndpoint": "https://YOUR_REGION.api.cognitive.microsoft.com/",
+  "ReferralTriageApp": {
+    "DocumentIntelligenceEndpoint": "https://YOUR_REGION.cognitiveservices.azure.com/",
     "DocumentIntelligenceKey": "YOUR_KEY",
     "AzureOpenAiEndpoint": "https://YOUR_RESOURCE.openai.azure.com/",
     "AzureOpenAiKey": "YOUR_KEY",
-    "AzureOpenAiDeploymentName": "gpt-4"
+    "AzureOpenAiDeploymentName": "gpt-4o"
+  },
+  "ConnectionStrings": {
+    "SqlServer": "Server=YOUR_SERVER;Database=ReferralTriage;...",
+    "BlobStorage": "DefaultEndpointsProtocol=https;AccountName=YOUR_ACCOUNT;..."
   }
 }
 ```
@@ -139,14 +163,20 @@ Using Azure Developer CLI:
 azd up
 ```
 
-Or using Bicep directly:
+Or using Bicep directly (from the `cerebricep` repo root):
 
 ```bash
-az deployment group create \
-  --resource-group referral-triage-rg \
-  --template-file infra/main.bicep \
-  --parameters location=eastus environment=dev projectName=referral-triage
+export ENVIRONMENT=dev
+export SQL_ADMIN_PASSWORD="$(openssl rand -base64 32 | tr -d '/' | cut -c1-20)"
+
+az deployment sub create \
+  --location eastus2 \
+  --template-file infra/workloads/referral-triage/main.bicep \
+  --parameters infra/workloads/referral-triage/environments/${ENVIRONMENT}.bicepparam \
+  --parameters sqlAdminPassword="${SQL_ADMIN_PASSWORD}"
 ```
+
+See `infra/workloads/referral-triage/DEPLOYMENT-NOTES.md` for the full deployment checklist and what-if / dry-run steps.
 
 ## API Usage
 
@@ -189,33 +219,23 @@ Configure via `local.settings.json` or Azure Function App Settings:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `ReferralTriageApp:BlobStorageAccount` | Blob storage account name | `referralstoragedev` |
+| `ReferralTriageApp:BlobStorageAccount` | Blob storage account name | `rtstoredev` |
 | `ReferralTriageApp:BlobContainer` | Blob container name | `referrals` |
-| `ReferralTriageApp:BlobIncomingPath` | Blob path where incoming docs are stored | `incoming` |
-| `ReferralTriageApp:SqlServerDatabase` | SQL Server database name | `referral_triage` |
-| `ReferralTriageApp:TriageRecordsTableName` | SQL Server table name | `triage_records` |
-| `ReferralTriageApp:MaxFileSizeBytes` | Max upload file size | `52428800` (50 MB) |
-| `ReferralTriageApp:AllowedFileTypes` | Comma-separated file types | `pdf,txt,png,jpg,jpeg` |
-| `ReferralTriageApp:AllowedSpecialties` | Comma-separated specialties | `cardiology,orthopaedics,neurology,dermatology,general_medicine` |
+| `ReferralTriageApp:BlobIncomingPath` | Path prefix for incoming documents | `incoming` |
+| `ReferralTriageApp:SqlServerDatabase` | SQL Server database name | `ReferralTriage` |
+| `ReferralTriageApp:TriageRecordsTableName` | SQL Server table name | `TriageRecord` |
+| `ReferralTriageApp:MaxFileSizeBytes` | Max upload file size in bytes | `52428800` (50 MB) |
+| `ReferralTriageApp:AllowedFileTypes` | Comma-separated file extensions | `pdf,txt,png,jpg,jpeg` |
+| `ReferralTriageApp:AllowedSpecialties` | Comma-separated allowed specialties | `cardiology,orthopaedics,neurology,dermatology,general_medicine` |
 | `ReferralTriageApp:AllowedUrgencies` | Comma-separated urgency levels | `routine,soon,urgent` |
-| `ReferralTriageApp:MetricsAggregationSchedule` | CRON expression for timer | `0 0 2 * * *` (daily 2 AM) |
-| `ReferralTriageApp:ConfidenceThreshold` | AI confidence score threshold for auto-completion (0.0-1.0) | `0.90` |
-| `ReferralTriageApp:DLQName` | Azure Storage Queue name for dead-lettered referrals | `referral-dlq` |
-
-### Quality Gates Configuration
-
-The triage pipeline applies quality gates to determine whether a referral can be auto-completed or requires manual review:
-
-1. **Confidence Score Gate**: AI confidence score must be >= `ReferralTriageApp:ConfidenceThreshold`
-2. **Required Fields Gate**: All required extracted fields must be populated (non-empty):
-   - `patient_name`
-   - `dob` (date of birth)
-   - `symptoms`
-   - `duration`
-   - `red_flags`
-
-If **both** gates pass, referral status is set to `"completed"` (auto-completion).
-If **either** gate fails, referral status is set to `"pending_review"` (manual review required).
+| `ReferralTriageApp:MetricsAggregationSchedule` | CRON pattern for daily timer | `0 0 2 * * *` (UTC 02:00 daily) |
+| `ReferralTriageApp:ConfidenceThreshold` | Minimum AI confidence score (0.0-1.0) | `0.90` |
+| `ReferralTriageApp:DLQName` | Dead-letter queue name | `referral-dlq` |
+| `ReferralTriageApp:DocumentIntelligenceEndpoint` | Document Intelligence service endpoint | Required |
+| `ReferralTriageApp:DocumentIntelligenceKey` | Document Intelligence service key | Required |
+| `ReferralTriageApp:AzureOpenAiEndpoint` | Azure OpenAI service endpoint | Required |
+| `ReferralTriageApp:AzureOpenAiKey` | Azure OpenAI service key | Required |
+| `ReferralTriageApp:AzureOpenAiDeploymentName` | GPT model deployment name | `gpt-4o` |
 
 ### Dead-Letter Queue
 
@@ -224,210 +244,65 @@ Failed referrals are emitted to an Azure Storage Queue specified by `ReferralTri
 ```json
 {
   "referralId": "550e8400-e29b-41d4-a716-446655440000",
-  "failureReason": "document_extraction_failed|classification_failed|validation_failed|...",
+  "failureReason": "extraction_failed|classification_failed|validation_failed|blob_not_found|unsupported_document_format|invalid_input",
   "errorMessage": "Detailed error message",
   "timestamp": "2024-03-08T10:30:00Z",
   "retryCount": 2
 }
 ```
 
-Failure reasons:
-- `document_extraction_failed` - Text extraction from document failed after max retries
-- `classification_failed` - AI classification failed after max retries
-- `validation_failed` - Triage record validation failed
-- `blob_not_found` - Document blob not found in Blob Storage
-- `blob_access_denied` - Access denied when reading document blob
-- `unsupported_document_format` - File extension not supported
-- `invalid_input` - Referral ID or file name missing/invalid
-- `operation_timeout` - Processing timed out
-- `unexpected_error` - Unexpected application error
-
-## How GPT-4o Is Inferring Your Data (Based on Your Code)
-
-Your system uses multiple mechanisms to ensure reliable data inference from medical referral documents. Understanding these mechanisms reveals why GPT-4o can accurately extract structured data rather than simply "guessing."
-
-### 1. Explicit Instructions via Prompts
-
-GPT-4o receives two levels of instruction:
-
-**System Prompt** (the core instruction):
-- Defines the role: "You are a medical triage specialist"
-- Sets constraints: "Extract only valid specialties and urgency levels"
-- Specifies output format: "Return a JSON object with these exact fields"
-
-**User Prompt** (the task):
-- The actual referral document text (extracted via Document Intelligence)
-- Explicit field requirements: "Extract patient_name, dob, symptoms, duration, red_flags"
-- Examples of valid values: "Specialties: cardiology, orthopaedics, neurology, dermatology, general_medicine"
-
-GPT-4o reads these instructions and knows exactly what to extract. It's not inferring your intent—you're explicitly telling it.
-
-### 2. Structured Function Calling (Not Just "Asking")
-
-This is the key mechanism that prevents hallucination. Rather than asking GPT-4o to "return JSON" (which it might format incorrectly), you use **function calling** with a strict schema:
-
-```json
-{
-  "name": "triage_referral",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "extracted_fields": {
-        "type": "object",
-        "properties": {
-          "specialty": {
-            "type": "string",
-            "enum": ["cardiology", "orthopaedics", "neurology", "dermatology", "general_medicine"]
-          },
-          "urgency": {
-            "type": "string",
-            "enum": ["routine", "soon", "urgent"]
-          },
-          "patient_name": { "type": "string" },
-          "dob": { "type": "string", "format": "date" },
-          "symptoms": { "type": "string" },
-          "duration": { "type": "string" },
-          "red_flags": { "type": "string" },
-          "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 }
-        }
-      }
-    },
-    "required": ["extracted_fields"]
-  }
-}
-```
-
-**What this does:** The tool schema defines this structure and these allowed values. GPT-4o will attempt to follow it, which greatly reduces formatting errors and constrains what it can return, but does **not** guarantee that the extracted data or chosen values are factually correct. In practice, the model is constrained to:
-- Pick `specialty` from the enum (cardiology, orthopaedics, neurology, dermatology, or general_medicine)
-- Pick `urgency` from the enum (routine, soon, or urgent)
-- Fill in required string/date fields with values it infers or extracts from the referral text
-- Return a `confidence_score` between 0 and 1
-
-This is **constraint-based inference**—the schema helps enforce structural data integrity and constrain allowed values, but downstream validation (like the quality gates below) is still required to catch incorrect or low-confidence inferences.
-
-### 3. Quality Gates After Classification
-
-After GPT-4o returns its classification, your system applies validation gates:
-
-**Confidence Score Gate:**
-```csharp
-if (triageResult.ConfidenceScore < 0.90) {
-    status = "pending_review";  // Reject low-confidence results
-}
-```
-
-GPT-4o returns a `confidence_score` (0-1). You reject anything < 0.90. This is where you're saying: *"I don't trust this inference—escalate to human review."*
-
-**Required Fields Gate:**
-```csharp
-var requiredFields = new[] { "patient_name", "dob", "symptoms", "duration", "red_flags" };
-if (requiredFields.Any(f =>
-{
-    return !extractedFields.TryGetValue(f, out var value) ||
-           string.IsNullOrWhiteSpace(value);
-})) {
-    status = "pending_review";  // Reject incomplete or missing extractions
-}
-```
-
-If either gate fails, the referral is flagged for manual review rather than auto-completion.
-
-### 4. Fallback: Keyword Heuristics
-
-If Azure OpenAI isn't available or fails, your system has a mock classification fallback:
-
-```csharp
-// Example fallback pattern matching when AI is unavailable (pseudocode)
-// Derive urgency from simple keywords in the referral text
-if (text.Contains("urgent", StringComparison.OrdinalIgnoreCase) ||
-    text.Contains("emergency", StringComparison.OrdinalIgnoreCase) ||
-    text.Contains("severe", StringComparison.OrdinalIgnoreCase))
-{
-    urgency = "urgent";
-}
-
-// Derive specialty from keyword matches as well
-if (text.Contains("cardiology", StringComparison.OrdinalIgnoreCase) ||
-    text.Contains("heart", StringComparison.OrdinalIgnoreCase))
-{
-    specialty = "cardiology";
-}
-else if (text.Contains("orthopaedic", StringComparison.OrdinalIgnoreCase) ||
-         text.Contains("orthopedic", StringComparison.OrdinalIgnoreCase) ||
-         text.Contains("bone", StringComparison.OrdinalIgnoreCase))
-{
-    specialty = "orthopaedics";
-}
-// ... additional keyword rules mirroring TriageClassificationService
-```
-
-This shows: *Even your fallback is pattern matching, not "understanding."* It's deterministic and predictable.
-
-### The Real Answer: Why This Works
-
-GPT-4o infers your desired data through a combination of mechanisms:
-
-1. **Explicit Prompt** – Your system + user prompts tell it exactly what role to play and what to extract
-2. **Forced Structure** – Function calling + enums constrain the output shape; it can't deviate
-3. **Confidence Scoring** – You provide the threshold (0.90); GPT-4o exposes its uncertainty
-4. **Validation Loop** – You catch when specialty/urgency don't match allowed values and escalate to manual review
-5. **Fallback Heuristics** – Pattern matching provides deterministic behavior when AI is unavailable
-
-### What GPT-4o Cannot Do Without You Telling It
-
-- **It has no idea your confidence threshold is 0.90** without you logging it in code and enforcing it at runtime
-- **It doesn't know which fields are "required"** unless you include them in the JSON schema's `required` array
-- **It can't invent specialties** – they're locked to your enum list (cardiology, orthopaedics, etc.)
-- **It doesn't understand your downstream validation** – if a specialty/urgency value doesn't match your database constraints, that's caught by your validation rules, not GPT-4o
-
-### The Uncertainty: When Confidence < 0.90
-
-When GPT-4o returns `confidence_score < 0.90`, that's it saying: *"I saw patterns in the document, but I wasn't sure."*
-
-Your system correctly treats this as unreliable and escalates to manual review. This is the appropriate response—GPT-4o is exposing its uncertainty rather than confidently returning a wrong answer.
-
-**In summary:** You're not relying on GPT-4o to "understand" medicine. You're using it as a pattern-matching engine with guardrails. The schema, prompts, confidence thresholds, and validation rules are your safety net.
-
 ## Domain Models
 
-### ReferralDocument
-- `id` (string) - Unique referral ID
-- `documentFormat` (string) - File type (pdf, txt, png, jpg, jpeg)
-- `blobPath` (string) - Azure Blob Storage path
-- `documentHash` (string) - SHA256 hash
-- `submittedAt` (DateTime) - Submission timestamp
-- `patientMRN` (string, optional) - Patient Medical Record Number
-- `status` (string) - pending, processing, completed, failed
+### Referral
+- `ReferralId` (GUID) - Unique referral identifier
+- `DocumentFormat` (string) - File type (pdf, txt, png, jpg, jpeg)
+- `DocumentStoragePath` (string) - Blob Storage path
+- `DocumentHash` (string) - SHA256 hash
+- `Status` (string) - pending, triaging, completed, failed
+- `SubmittedAt` (DateTime) - Submission timestamp
+- `SubmittedBy` (string) - User identifier
+- `CreatedAt`, `ModifiedAt` (DateTime) - Audit timestamps
 
 ### TriageRecord
-- `id` (string) - Referral ID
-- `specialty` (string) - Classified specialty
-- `urgency` (string) - Classification urgency level
-- `extractedFields` (Dictionary) - Required: patient_name, dob, symptoms, duration, red_flags
-- `clinicalSummary` (string) - Max 500 characters
-- `confidenceScore` (double) - AI confidence 0.0-1.0
+- `TriageRecordId` (GUID) - Unique record identifier
+- `ReferralId` (GUID) - Foreign key to Referral
+- `Specialty` (string) - cardiology, orthopaedics, neurology, dermatology, general_medicine
+- `Urgency` (string) - routine, soon, urgent
+- `ExtractedFields` (JSON string) - Dictionary with patient_name, dob, symptoms, duration, red_flags
+- `ClinicalSummary` (string) - Max 500 characters
+- `ConfidenceScore` (decimal) - 0.0-1.0 AI confidence
+- `TriagedAt` (DateTime) - Triage completion time
+- `CreatedAt`, `ModifiedAt` (DateTime) - Audit timestamps
+
+### DomainEventLog
+- `DomainEventId` (GUID) - Event identifier
+- `ReferralId` (GUID) - Associated referral
+- `EventType` (string) - Event category
+- `CreatedAt` (DateTime) - Event timestamp
 
 ### DailyMetrics
-- `id` (string) - Metric date identifier
-- `metricDate` (DateTime) - Date of metrics
-- `totalReferralsProcessed` (int) - Count
-- `referralsBySpecialty` (Dictionary) - Specialty breakdown
-- `routineCount`, `soonCount`, `urgentCount` (int) - Urgency counts
-- `averageProcessingLatencyMs` (double) - Processing latency
-- `missingFieldRates` (Dictionary) - Missing field percentages
+- `Id` (string) - Metric date identifier (date-YYYY-MM-DD)
+- `MetricDate` (DateTime) - Date of metrics
+- `TotalReferralsProcessed` (int) - Count processed
+- `ReferralsBySpecialty` (JSON dict) - Specialty breakdown
+- `RoutineCount`, `SoonCount`, `UrgentCount` (int) - Urgency breakdowns
+- `AverageProcessingLatencyMs` (double) - Mean processing time
+- `MissingFieldRates` (JSON dict) - Missing field percentages
 
 ## Validation Rules
 
 ### ReferralIntakeRequest
-- DocumentData: Valid base64, 1 byte to 50 MB
-- DocumentFormat: One of allowed types
-- PatientMRN: Optional
+- `DocumentData`: Valid base64-encoded file
+- `DocumentFormat`: One of (pdf, txt, png, jpg, jpeg)
+- `DocumentSize`: ≤ 50 MB (check `MaxFileSizeBytes`)
+- `PatientMRN`: Optional
 
 ### TriageRecord
-- Specialty: Must be one of allowed specialties
-- Urgency: Must be one of allowed urgencies
-- ExtractedFields: All required fields with non-empty values
-- ClinicalSummary: 1-500 characters
+- `Specialty`: One of (cardiology, orthopaedics, neurology, dermatology, general_medicine)
+- `Urgency`: One of (routine, soon, urgent)
+- `ExtractedFields`: All required fields (patient_name, dob, symptoms, duration, red_flags) with non-empty values
+- `ClinicalSummary`: 1-500 characters
+- `ConfidenceScore`: 0.0-1.0; values < 0.90 recommended for manual review
 
 ## Monitoring & Diagnostics
 
@@ -448,10 +323,17 @@ func azure functionapp logstream <function-app-name>
 
 ## Testing
 
+Run unit tests:
+
 ```bash
-cd src/ReferralTriageApp
+cd src/ReferralTriageApp.Tests
 dotnet test
 ```
+
+Current test coverage:
+- RetryHelperTests - Exponential backoff and retry logic
+- ValidationServiceTests - Referral and triage record validation
+- QualityGatesTests - Confidence score and required fields gates
 
 ## Cost Optimization
 
@@ -506,4 +388,7 @@ See LICENSE file.
 
 ## Support
 
-For issues or questions, consult the project's SpecForge documentation in the `features/` directory.
+For issues or questions, see:
+- `openspec/changes/implement-triage-pipeline/` - Change specification and design decisions
+- Application Insights logs - Function execution and errors
+- Azure Monitor - Service health and scaling metrics
